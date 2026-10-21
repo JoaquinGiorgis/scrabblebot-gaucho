@@ -8,7 +8,7 @@ you're only writing a bot, see [README.md](README.md) and
 
 | Where | What it is | Stack |
 |---|---|---|
-| `spacetimedb/` | The whole game — schema, reducers, scheduled ticks, dictionary | Rust → WASM via [SpacetimeDB](https://spacetimedb.com) |
+| `spacetimedb/` | The whole game — schema, reducers, scheduled ticks, dictionary | TypeScript module on [SpacetimeDB](https://spacetimedb.com) |
 | `src/` | Spectator + admin + team UI | Vite + React + react-router-dom |
 | `bot-starter/` | Reference bot client | Node + TypeScript + SpacetimeDB SDK |
 | `spacetime.json` / `spacetime.local.json` | Project config (module path, db name, dev client command) | — |
@@ -25,7 +25,7 @@ There is no separate backend or auth server.
                           ▼
                   ┌─────────────────┐
               ┌──▶│   reducers      │──┐
-              │   │   (lib.rs)      │  │
+              │   │   (index.ts)    │  │
               │   └─────────────────┘  │
               │                        ▼
               │              ┌─────────────────┐
@@ -72,16 +72,16 @@ times:
 3. If **6 real bots** join, the lobby resolves immediately into a Match.
 4. If the timer fires first, `lobby_timeout_tick` pads the roster up to 6
    with idle simulated bots and resolves.
-5. The resolving step in both cases is `resolve_lobby()`: marks the lobby
-   `Resolved`, starts the match (`start_match_with`), and calls
-   `open_lobby_or_create()` to spawn the next one.
+5. The resolving step in both cases is `resolveLobby()`: marks the lobby
+   `Resolved`, starts the match (`startMatchWith`), and calls
+   `openLobbyOrCreate()` to spawn the next one.
 
 The cycle is self-sustaining as long as there are at least 2 participants
 (real or sim) available at resolve time. If fewer, the lobby is
 `Cancelled` and a fresh one opens.
 
 Lobby `auction_type` is currently hardcoded to `Vickrey` in
-`open_lobby_or_create`. Easy knob to expose later if we want to alternate.
+`openLobbyOrCreate`. Easy knob to expose later if we want to alternate.
 
 ## Match lifecycle
 
@@ -90,7 +90,7 @@ Each match has its own row in `Match`. State is fully per-match:
 - `MatchParticipant { match_id, bot_id, balance, score }` — replaces what
   used to live on `Bot` (we're a multi-match game).
 - `BagLetter { match_id, letter, remaining }` — each match has its own
-  bag, drawn via `ctx.rng()` for determinism.
+  bag, drawn via `ctx.random` for determinism.
 - `Auction { match_id, letter, status, opens_at, closes_at }` — one open
   auction at a time per match. The next auction is scheduled by
   `auction_tick`.
@@ -107,36 +107,87 @@ Each match has its own row in `Match`. State is fully per-match:
 `auction_tick` is a self-rescheduling scheduled reducer that runs every
 `AUCTION_DURATION_MS` (1s). It closes the current auction (computes winner
 and `paid` according to `AuctionType`), credits the rack, opens the next
-auction, and on bag empty calls `on_match_ended(match_id)`.
+auction, and on bag empty calls `onMatchEnded(match_id)`.
 
-`on_match_ended` does two things:
+`onMatchEnded` does two things:
 
-1. **ELO update** — `update_elo_at_match_end` runs pairwise: for each
-   pair `(i, j)` of participants sorted by score, compute expected
-   probability from current ratings, observe the outcome (1/0/0.5),
-   accumulate a delta per bot, apply averaged over `(n − 1)` opponents.
-   K=32.
+1. **ELO update** — `updateEloAtMatchEnd` rates each participant
+   against every other by final score, with Elo (K=32) and Weng-Lin
+   (OpenSkill). `ratings.ts` is a port of the Rust `skillratings` crate
+   the module used before, and reproduces its results exactly.
 2. **Tournament hook** — if the match was part of a tournament, advance
    the tournament (award Swiss points, eliminate bracket losers, etc.).
 
+## Match defaults
+
+The auction length, starting rack size and lobby size come from the
+single `matchmaker_config` row (id 0) once an admin has saved one with
+`set_matchmaker_config`, and from the constants in `game.ts` until then.
+Each match copies the auction length and rack size into its own row when
+it starts (`auction_duration_ms`, `starting_rack_size`), and each lobby
+its `max_size` when it opens, so changing the defaults never changes a
+match or lobby already under way. The spectator UI reads a match's
+`startingRackSize` to count its face-down tiles.
+
 ## Tournament
 
-Three phases on a single Tournament row:
+An admin creates a tournament with `create_tournament`, which opens it
+for registration (status `Registration`); only one tournament can be open
+or under way at a time. Bots enter with `register_for_tournament` and
+leave with `unregister_from_tournament`, both called from the bot's own
+process: the caller has to be one of the bot's credentials, and a browser
+identity never is. `register_sim_bots` enters every sim for a rehearsal.
+`cancel_tournament` deletes a tournament that hasn't started.
 
-- **Swiss**: `start_tournament` pairs all bots randomly into matches of
-  size `match_size` for round 1. Subsequent rounds sort by `swiss_points`
-  and pair adjacently. Points awarded per finishing position
-  (1st = `n`, last = 1).
-- **Bracket**: after the configured number of Swiss rounds, top
-  `top_cut` advance. Each round eliminates the last-place finisher per
-  match. Continues until only 2 remain.
-- **Final**: best-of-3 between the last 2. Aggregate score across all 3
-  games determines the winner.
+`start_tournament` drops entries whose bot has been deleted and needs at
+least `match_size` entrants. It takes entrants out of the open lobby, and
+until they're knocked out or the tournament ends, `join_lobby` refuses
+them and `resolve_lobby` skips them (`heldForTournament`), so they're free
+for every tournament match. Sims are exempt, so they keep padding casual
+lobbies. A real (non-sim) entrant still in a casual match finishes it
+first: the tournament sits at Swiss round 0, and round 1 starts when the
+last of those matches ends (`startRoundOneWhenFree`). Then three phases
+run on the Tournament row:
+
+- **Swiss**: `start_tournament` pairs the entrants randomly into matches of
+  about `match_size` for round 1. Later rounds sort by the standings and
+  pair adjacently. Nobody sits out: there are `floor(n / match_size)`
+  tables and any leftover bots are spread one per table, so 7 bots at
+  size 3 play at tables of 4 and 3. Points per finishing position are
+  `match_size − place` (1st = `match_size`), floored at 0, so first is
+  worth the same at every table. Bots on the same score share the higher
+  place, as tied leaders all get a win in `bot_stats`.
+- **The cut**: after the configured number of Swiss rounds the top
+  `top_cut` go through, ranked by Swiss points, then `total_score` (the
+  bot's score over all its matches in the tournament), then the lower bot
+  id. The tournament moves to `Bracket`, or straight to `Final` if only two
+  went through.
+- **Bracket**: each elimination match seats every bot still in and knocks
+  out its last-place finisher, a tie going to `total_score` and then the
+  higher bot id, so there are no replays. The knocked-out bot's
+  `final_finish_position` is the number left before the match. With two
+  left the tournament moves to `Final`.
+- **Final**: three games between the last two. Their score over the three
+  games, then `total_score`, then bot id, decides 1st and 2nd. The
+  tournament is then `Ended` with `winner_bot_id` set.
+
+Matches after the cut wait for the admin: `start_next_finals_match` starts
+the next elimination match or final game, and refuses while one is being
+played, so the finals can be run from a stage.
+
+A tournament can't seat a deleted bot, so `leave_team` won't let the last
+member dissolve a team whose bot is still in contention in a tournament
+under way. Dissolving withdraws the bot from tournaments still in
+registration, and keeps its entries in ones it has played.
+
+`force_end_tournament` stops a tournament that's under way, leaving it
+`ForceEnded` with no champion. Its matches in progress play out as
+ordinary matches.
 
 `TournamentMatch` links `Tournament` ↔ `Match` rows with `round` and
-`phase`. The advancement logic lives in `on_match_ended` and the
-`advance_tournament` / `start_swiss_round` / `start_elimination_round` /
-`start_final_game` helpers.
+`phase`. The logic lives in `tournament.ts`: `onTournamentMatchEnded`
+scores each result, and stops moving a tournament once it has finished or
+been stopped.
 
 ## Sealed-bid implementation
 
@@ -153,21 +204,21 @@ bids via subscription deltas, but for a hackathon this is sufficient.
 
 | View | Returns | Purpose |
 |---|---|---|
-| `my_rack` | `Vec<Holding>` | The caller's letters across all matches they're in (private to caller) |
-| `my_team` | `Option<MyTeam>` | The calling human's team summary (resolves browser→human via `HumanLink`) |
-| `my_nonces` | `Vec<CredentialNonce>` | Nonces the caller has minted (private to caller) |
-| `my_admin` | `Option<Admin>` | Caller's admin row if present |
+| `my_rack` | `Holding[]` | The caller's letters across all matches they're in (private to caller) |
+| `my_team` | `TeamSummary \| undefined` | The calling human's team summary (resolves browser→human via `HumanLink`) |
+| `my_nonces` | `CredentialNonce[]` | Nonces the caller has minted (private to caller) |
+| `my_admin` | `Admin \| undefined` | Caller's admin row if present |
 
 Views are how we let clients query data that depends on the caller's
 identity without exposing it to everyone. Two helpers handle the
 browser-vs-CLI ambiguity:
 
-```rust
-fn resolve_human(ctx: &ReducerContext) -> Identity;
-fn resolve_human_view(ctx: &ViewContext) -> Identity;
+```ts
+function resolveHuman(ctx: Ctx): Identity;
+function resolveHumanView(ctx: ViewContext): Identity;
 ```
 
-Both look up `HumanLink` by `ctx.sender()`; if the caller is a linked
+Both look up `HumanLink` by `ctx.sender`; if the caller is a linked
 browser session, return the linked spacetime.com identity, otherwise
 assume the caller already *is* the human.
 
@@ -176,18 +227,23 @@ assume the caller already *is* the human.
 | Reducer | Caller | Notes |
 |---|---|---|
 | `connect_id(web_identity)` | Human (CLI) | Writes a `HumanLink` |
-| `create_team(team, bot)` / `join_team` / `leave_team` / `promote_to_owner` | Human | Resolves caller via `resolve_human` |
+| `create_team(team, bot)` / `join_team` / `leave_team` / `promote_to_owner` | Human | Resolves caller via `resolveHuman` |
 | `mint_credential_nonce()` | Team member | Writes a `CredentialNonce` |
 | `claim_credential(code)` | Fresh anonymous client | Writes a `BotCredential` |
-| `join_lobby()` | Bot credential | Looks up `caller_bot_id` via `BotCredential` |
+| `join_lobby()` | Bot credential | Looks up `callerBotId` via `BotCredential` |
 | `submit_bid(auction_id, amount)` | Bot credential | Idempotent — replaces any earlier bid by this bot on this auction |
 | `submit_word(match_id, word)` | Bot credential | Validates dictionary + ownership, deducts letters, credits score |
 | `bootstrap_admin()` | Anyone (first time only) | Allowed iff `Admin` table is empty |
-| `add_admin` / `remove_admin` | Admin | Caller checked via `require_admin` |
+| `add_admin` / `remove_admin` | Admin | Caller checked via `requireAdmin` |
 | `spawn_simulated_bot(name, strategy)` | Admin | Bypasses team flow — creates Bot + BotCredential with a fabricated identity |
-| `start_tournament(...)` | Admin | — |
+| `create_tournament(...)` / `start_tournament(id)` / `cancel_tournament(id)` / `register_sim_bots(id)` | Admin | |
+| `start_next_finals_match(id)` | Admin | One finals match at a time |
+| `set_matchmaker_config(rack, lobby, auction_ms)` | Admin | Defaults for new matches and lobbies |
+| `force_end_tournament(id)` | Admin | Stops a tournament under way: status `ForceEnded`, no champion |
+| `register_for_tournament(id)` / `unregister_from_tournament(id)` | Bot credential | Only while the tournament is in `Registration` |
+| `auction_tick` / `lobby_timeout_tick` | Scheduler only | `requireScheduler` rejects any client caller |
 
-Reducers that move shared state are admin-gated via `require_admin(ctx)?`
+Reducers that move shared state are admin-gated via `requireAdmin(ctx)`
 at the top of the function.
 
 ## Init seeding
@@ -202,7 +258,7 @@ dev republishes counts). It seeds:
 3. **The first lobby** — kicks the perpetual lobby cycle into motion.
 
 To add yourself as a permanent admin, add your spacetime.com identity hex
-to `SEED_ADMIN_HEX` in `lib.rs`.
+to `SEED_ADMIN_HEX` in `game.ts`.
 
 ## Frontend architecture
 
@@ -251,8 +307,9 @@ public events.
 ## Dev workflow
 
 ```bash
-npm install      # web
-npm run dev      # spacetime dev + Vite together
+npm install                       # web
+npm install --prefix spacetimedb  # module
+npm run dev                       # spacetime dev + Vite together
 ```
 
 `npm run dev` runs:
@@ -264,6 +321,23 @@ npm run dev      # spacetime dev + Vite together
 For local development, use `npm run dev:local` (requires
 `spacetime start` running in another terminal).
 
+### Tests
+
+The module has unit tests under `spacetimedb/src/tests/`. They use
+SpacetimeDB's test harness (`spacetimedb/server/test-utils`, 2.12.0+) with
+Vitest: each test builds a fresh in-memory database from the module
+schema, calls reducers and views directly as a chosen caller, and inspects
+every table, private ones included. No server needed.
+
+```bash
+cd spacetimedb
+npm test                   # the suite (~3s)
+```
+
+The harness doesn't run scheduled reducers or check `senderAuth` the way a
+host does, so also try changes against a real server (`npm run
+dev:local`).
+
 ### Database name
 
 Set in `spacetime.local.json`. Currently `scrabblebot`. To rename in
@@ -272,10 +346,18 @@ place on maincloud (preserving data): `spacetime rename <db-identity-hex>
 
 ### Versions matter
 
-`spacetimedb` Cargo crate, npm `spacetimedb`, and the `spacetime` CLI
-must all be the same major version (currently 2.2.0). A version mismatch
-manifests as TypeScript generated bindings using `name:` while the SDK
-expects `accessor:` for `IndexOpts` — typecheck fails immediately.
+npm `spacetimedb` (module, web app and bot-starter) and the `spacetime`
+CLI should all be on the same version, currently 2.12.0. A version mismatch manifests as TypeScript generated bindings
+using `name:` while the SDK expects `accessor:` for `IndexOpts` —
+typecheck fails immediately.
+
+TypeScript identifiers are camelCase everywhere: table accessors
+(`ctx.db.matchState`, `conn.db.myRack`), columns, index accessors
+(`.webIdentity`), reducers and views. The canonical names that SQL, the
+CLI and the HTTP API use are snake_case (`match_state`,
+`start_tournament`), derived by the SDK's default case conversion.
+Renaming an index accessor is not an automatic migration in 2.12, so a
+change that renames one has to be published with `--delete-data`.
 
 ## Deployment
 
@@ -299,9 +381,6 @@ expects `accessor:` for `IndexOpts` — typecheck fails immediately.
 
 ## Known limitations
 
-- `auction_tick` and `lobby_timeout_tick` are callable by any client (not
-  just the scheduler). Fine for a hackathon — for production, gate on the
-  scheduler's identity.
 - The dictionary is the public-domain ENABLE list. Real Scrabble play
   uses TWL (US) or SOWPODS (international); drop one in at
   `spacetimedb/wordlist.txt` (sorted, uppercase, one word per line) if

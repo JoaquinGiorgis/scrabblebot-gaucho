@@ -201,6 +201,8 @@ export const Match = __t.object("Match", {
   createdAt: __t.timestamp(),
   startedAt: __t.option(__t.timestamp()),
   endedAt: __t.option(__t.timestamp()),
+  auctionDurationMs: __t.u64(),
+  startingRackSize: __t.u32(),
 });
 export type Match = __Infer<typeof Match>;
 
@@ -221,17 +223,32 @@ export const MatchStatus = __t.enum("MatchStatus", {
 });
 export type MatchStatus = __Infer<typeof MatchStatus>;
 
-export const MyTeam = __t.object("MyTeam", {
-  teamId: __t.u64(),
-  teamName: __t.string(),
-  botId: __t.u64(),
-  botName: __t.string(),
-  get role() {
-    return TeamRole;
-  },
-  credentialCount: __t.u32(),
+export const MatchmakerConfig = __t.object("MatchmakerConfig", {
+  id: __t.u32(),
+  startingRackSize: __t.u32(),
+  lobbyMaxSize: __t.u32(),
+  auctionDurationMs: __t.u64(),
 });
+export type MatchmakerConfig = __Infer<typeof MatchmakerConfig>;
+
+export const MyAdmin = __t.object("MyAdmin", {});
+export type MyAdmin = __Infer<typeof MyAdmin>;
+
+export const MyNonces = __t.object("MyNonces", {});
+export type MyNonces = __Infer<typeof MyNonces>;
+
+export const MyRack = __t.object("MyRack", {});
+export type MyRack = __Infer<typeof MyRack>;
+
+export const MyTeam = __t.object("MyTeam", {});
 export type MyTeam = __Infer<typeof MyTeam>;
+
+export const NonceExpirySchedule = __t.object("NonceExpirySchedule", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  nonceId: __t.u64(),
+});
+export type NonceExpirySchedule = __Infer<typeof NonceExpirySchedule>;
 
 export const PendingBid = __t.object("PendingBid", {
   id: __t.u64(),
@@ -267,6 +284,18 @@ export const TeamRole = __t.enum("TeamRole", {
 });
 export type TeamRole = __Infer<typeof TeamRole>;
 
+export const TeamSummary = __t.object("TeamSummary", {
+  teamId: __t.u64(),
+  teamName: __t.string(),
+  botId: __t.u64(),
+  botName: __t.string(),
+  get role() {
+    return TeamRole;
+  },
+  credentialCount: __t.u32(),
+});
+export type TeamSummary = __Infer<typeof TeamSummary>;
+
 export const Tournament = __t.object("Tournament", {
   id: __t.u64(),
   get status() {
@@ -281,6 +310,7 @@ export const Tournament = __t.object("Tournament", {
   },
   createdAt: __t.timestamp(),
   endedAt: __t.option(__t.timestamp()),
+  winnerBotId: __t.option(__t.u64()),
 });
 export type Tournament = __Infer<typeof Tournament>;
 
@@ -290,6 +320,8 @@ export const TournamentEntry = __t.object("TournamentEntry", {
   botId: __t.u64(),
   swissPoints: __t.i32(),
   eliminated: __t.bool(),
+  totalScore: __t.i64(),
+  finalFinishPosition: __t.option(__t.u32()),
 });
 export type TournamentEntry = __Infer<typeof TournamentEntry>;
 
@@ -319,8 +351,13 @@ export const TournamentStatus = __t.enum("TournamentStatus", {
   Bracket: __t.unit(),
   Final: __t.unit(),
   Ended: __t.unit(),
+  Registration: __t.unit(),
+  ForceEnded: __t.unit(),
 });
 export type TournamentStatus = __Infer<typeof TournamentStatus>;
+
+export const VisibleAuctionTopBids = __t.object("VisibleAuctionTopBids", {});
+export type VisibleAuctionTopBids = __Infer<typeof VisibleAuctionTopBids>;
 
 export const WordPlay = __t.object("WordPlay", {
   id: __t.u64(),

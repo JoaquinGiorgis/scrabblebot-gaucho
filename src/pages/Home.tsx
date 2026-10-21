@@ -1,163 +1,382 @@
 import { Link } from "react-router-dom";
 import { useConn } from "../connection";
-import type { Lobby, LobbyMember, Match, Bot } from "../module_bindings/types";
-import { fmtTimestamp } from "../util";
+import type {
+  Auction,
+  Bot,
+  Lobby,
+  LobbyMember,
+  Match,
+  MatchParticipant,
+  WordPlay,
+} from "../module_bindings/types";
+import {
+  botNames,
+  matchHistory,
+  openAuctions,
+  standingsByMatch,
+  type BotNames,
+} from "../data";
+import {
+  matchOutcome,
+  msUntil,
+  plural,
+  reconstructRacks,
+  type PublicRack,
+} from "../util";
+import { Tile } from "../Tile";
+import { Standings } from "../Standings";
+import { BagBar, BagCount, Panel } from "../ui";
 
 export default function Home() {
-  const { conn, version } = useConn();
-  void version;
+  const { conn } = useConn();
+  const now = Date.now();
 
-  const matches: Match[] = [];
-  const bots: Bot[] = [];
-  const lobbies: Lobby[] = [];
-  const allLobbyMembers: LobbyMember[] = [];
-  if (conn) {
-    for (const m of conn.db.match_state.iter()) matches.push(m);
-    for (const b of conn.db.bot.iter()) bots.push(b);
-    for (const l of conn.db.lobby.iter()) lobbies.push(l);
-    for (const lm of conn.db.lobby_member.iter()) allLobbyMembers.push(lm);
-  }
+  const bots = conn ? [...conn.db.bot.iter()] : [];
+  const botName = botNames(conn);
+  const standings = standingsByMatch(conn);
+  const standingsOf = (m: Match) => standings.get(m.id) ?? [];
+
+  const matches = conn ? [...conn.db.matchState.iter()] : [];
   matches.sort((a, b) => Number(b.id - a.id));
   const running = matches.filter((m) => m.status.tag === "Running");
   const ended = matches.filter((m) => m.status.tag === "Ended");
 
   // The single open lobby (there's only ever one).
-  const openLobby = lobbies.find((l) => l.status.tag === "Open");
-  const openLobbyMembers = openLobby
-    ? allLobbyMembers.filter((lm) => lm.lobbyId === openLobby.id)
-    : [];
+  const lobby = conn
+    ? [...conn.db.lobby.iter()].find((l) => l.status.tag === "Open")
+    : undefined;
+  const lobbyMembers =
+    conn && lobby
+      ? [...conn.db.lobbyMember.iter()].filter((lm) => lm.lobbyId === lobby.id)
+      : [];
 
-  function botName(botId: bigint): string {
-    const b = bots.find((x) => x.id === botId);
-    return b?.name ?? `#${botId}`;
-  }
-
-  const now = Date.now();
-  const closesAtMs = openLobby ? fmtTimestamp(openLobby.closesAt) : 0;
-  const msLeft = Math.max(0, closesAtMs - now);
+  // The featured live match, with racks rebuilt from its public history.
+  const live = running[0];
+  const history =
+    conn && live ? matchHistory(conn, live.id) : { results: [], plays: [] };
 
   return (
     <>
-      <div className="header full">
-        <h1>ScrabbleBot</h1>
-        <span className="status">
-          {bots.length} bots · {running.length} running · {ended.length} completed
+      <section className="hero full">
+        <div className="hero-rack" aria-label="ScrabbleBot">
+          {[..."SCRABBLEBOT"].map((c, i) => (
+            <Tile
+              key={i}
+              letter={c}
+              style={{ "--i": i } as React.CSSProperties}
+            />
+          ))}
+        </div>
+        <div className="hero-body">
+          <Pitch
+            bots={bots.length}
+            running={running.length}
+            ended={ended.length}
+          />
+          {live ? (
+            <LiveCard
+              key={String(live.id)}
+              match={live}
+              auction={openAuctions(conn).get(live.id)}
+              standings={standingsOf(live)}
+              racks={reconstructRacks(
+                history.results,
+                history.plays,
+                live.startingRackSize,
+              )}
+              plays={history.plays}
+              others={running.slice(1)}
+              botName={botName}
+              now={now}
+            />
+          ) : (
+            <IdleCard lobby={lobby} members={lobbyMembers.length} now={now} />
+          )}
+        </div>
+      </section>
+
+      <NextMatch lobby={lobby} members={lobbyMembers} bots={bots} now={now} />
+      <RecentResults
+        ended={ended}
+        standingsOf={standingsOf}
+        botName={botName}
+      />
+    </>
+  );
+}
+
+function Pitch({
+  bots,
+  running,
+  ended,
+}: {
+  bots: number;
+  running: number;
+  ended: number;
+}) {
+  return (
+    <div>
+      <h1>Buy letters, sell words, write the smartest bot.</h1>
+      <p className="lede">
+        Start with 5 tiles and 100 scrabble-coins. Each round a new tile goes up
+        for auction, and every bot has one second to submit a private bid. The
+        highest bidder buys the new tile.
+      </p>
+      <p className="lede">
+        Play completed words to earn points and more money.
+      </p>
+      <p className="lede">
+        How much should you spend? How much is the current letter worth to you?
+        Be fast and bid wisely. Highest score wins.
+      </p>
+      <div className="hero-actions">
+        <Link to="/team/new" className="button">
+          Register a bot
+        </Link>
+        <Link to="/docs" className="button quiet">
+          How to write a bot
+        </Link>
+      </div>
+      <div className="hero-stats">
+        <span>
+          <b>{bots}</b>
+          {plural(bots, "bot", "bots")} registered
+        </span>
+        <span>
+          <b>{running}</b>
+          {plural(running, "match", "matches")} running
+        </span>
+        <span>
+          <b>{ended}</b>
+          {plural(ended, "match", "matches")} completed
         </span>
       </div>
+    </div>
+  );
+}
 
-      <section className="panel full">
-        <h2>Open lobby</h2>
-        {openLobby ? (
-          <>
-            <div className="row">
-              <div>
-                <div className="name">
-                  {openLobbyMembers.length} / {openLobby.maxSize} spots filled
-                </div>
-                <div className="secondary">
-                  {openLobby.auctionType.tag} auction · match #
-                  {String(openLobby.id)}
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 22, fontWeight: 600 }}>
-                  {(msLeft / 1000).toFixed(0)}s
-                </div>
-                <div className="secondary">until timeout</div>
-              </div>
-            </div>
-            <div className="rack" style={{ marginTop: 12 }}>
-              {openLobbyMembers.map((lm) => {
-                const b = bots.find((x) => x.id === lm.botId);
-                const sim = !!b?.isSimulated;
-                return (
-                  <span
-                    key={String(lm.id)}
-                    className="tile"
-                    style={{
-                      width: "auto",
-                      padding: "0 10px",
-                      fontWeight: 500,
-                      opacity: sim ? 0.6 : 1,
-                      fontSize: 13,
-                    }}
-                    title={sim ? "simulated" : "real bot"}
-                  >
-                    {botName(lm.botId)}
-                  </span>
-                );
-              })}
-              {Array.from({
-                length: Math.max(0, openLobby.maxSize - openLobbyMembers.length),
-              }).map((_, i) => (
-                <span
-                  key={`empty-${i}`}
-                  className="tile"
-                  style={{
-                    width: "auto",
-                    padding: "0 10px",
-                    background: "transparent",
-                    border: "1px dashed var(--border)",
-                    color: "var(--muted)",
-                    fontSize: 13,
-                  }}
-                >
-                  empty
-                </span>
-              ))}
-            </div>
-            <p className="secondary" style={{ marginTop: 12 }}>
-              Match starts when the lobby fills with real bots, or when the
-              timer hits zero (empty slots get padded with simulated bots).
-            </p>
-          </>
-        ) : (
-          <div className="secondary">No open lobby right now.</div>
-        )}
-      </section>
-
-      <section className="panel full">
-        <h2>What is this?</h2>
+function IdleCard({
+  lobby,
+  members,
+  now,
+}: {
+  lobby: Lobby | undefined;
+  members: number;
+  now: number;
+}) {
+  const seats = lobby ? lobby.maxSize - members : 0;
+  return (
+    <aside className="live-card idle" aria-label="Next match">
+      <div className="live-head">
+        <span className="live-title">No match running</span>
+      </div>
+      {lobby ? (
         <p>
-          ScrabbleBot is a Scrabble-style auction game for AI bots. Each round, one letter is revealed
-          and bots have <b>1 second</b> to submit a sealed bid. The winner pays (depending on the
-          auction type) and adds the letter to their rack. Bots play words from their collected
-          letters to earn currency, which they use to bid on future tiles.
+          The next match starts in{" "}
+          <b>{(msUntil(lobby.closesAt, now) / 1000).toFixed(0)}s</b>, with{" "}
+          {seats} {plural(seats, "seat", "seats")} still open.
         </p>
-        <p style={{ marginTop: 8 }}>
-          <Link to="/team/new">Register a bot →</Link>{" "}&nbsp;
-          <Link to="/docs">How to write a bot →</Link>{" "}&nbsp;
-          <Link to="/leaderboard">Leaderboard →</Link>
-        </p>
-      </section>
+      ) : (
+        <p>A new lobby opens when the next match is scheduled.</p>
+      )}
+    </aside>
+  );
+}
 
-      <section className="panel">
-        <h2>Running matches</h2>
-        {running.length === 0 && <div className="secondary">None right now.</div>}
-        {running.slice(0, 8).map((m) => (
-          <div key={String(m.id)} className="row">
-            <div>
-              <Link to={`/matches/${m.id}`}>Match #{String(m.id)}</Link>
-              <div className="secondary">
-                round {m.currentRound} · bag {m.bagTotal} · {m.auctionType.tag.toLowerCase()}
-              </div>
-            </div>
-          </div>
-        ))}
-      </section>
+function LiveCard({
+  match,
+  auction,
+  standings,
+  racks,
+  plays,
+  others,
+  botName,
+  now,
+}: {
+  match: Match;
+  auction: Auction | undefined;
+  standings: MatchParticipant[];
+  racks: Map<bigint, PublicRack>;
+  plays: WordPlay[];
+  others: Match[];
+  botName: BotNames;
+  now: number;
+}) {
+  return (
+    <aside className="live-card" aria-label="Live match">
+      <div className="live-head">
+        <span className="live-title">
+          <span className="live-dot" />
+          Live now
+        </span>
+        <Link to={`/matches/${match.id}`}>Match #{String(match.id)}</Link>
+      </div>
+      <div className="live-body">
+        <div className="live-tile">
+          {auction ? (
+            <Tile key={String(auction.id)} letter={auction.letter} size="lg" />
+          ) : (
+            <span className="tile-slot" />
+          )}
+          <span className="countdown">
+            {auction
+              ? `${(msUntil(auction.closesAt, now) / 1000).toFixed(1)}s`
+              : "—"}
+          </span>
+        </div>
+        <Standings
+          participants={standings}
+          racks={racks}
+          plays={plays}
+          botName={botName}
+          now={now}
+          limit={3}
+          startingRackSize={match.startingRackSize}
+        />
+      </div>
+      <BagBar bagTotal={match.bagTotal} />
+      <div className="live-foot">
+        <BagCount bagTotal={match.bagTotal} />
+        <Link to={`/matches/${match.id}`} className="button quiet">
+          Watch match
+        </Link>
+      </div>
+      {others.length > 0 && (
+        <div className="live-others status">
+          Also running:{" "}
+          {others.map((m, i) => (
+            <span key={String(m.id)}>
+              {i > 0 && ", "}
+              <Link to={`/matches/${m.id}`}>#{String(m.id)}</Link>
+            </span>
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
 
-      <section className="panel">
-        <h2>Recently completed</h2>
-        {ended.length === 0 && <div className="secondary">No completed matches yet.</div>}
-        {ended.slice(0, 8).map((m) => (
-          <div key={String(m.id)} className="row">
-            <div>
-              <Link to={`/matches/${m.id}`}>Match #{String(m.id)}</Link>
-              <div className="secondary">{m.auctionType.tag.toLowerCase()}</div>
-            </div>
+function NextMatch({
+  lobby,
+  members,
+  bots,
+  now,
+}: {
+  lobby: Lobby | undefined;
+  members: LobbyMember[];
+  bots: Bot[];
+  now: number;
+}) {
+  if (!lobby) {
+    return (
+      <Panel title="Next match">
+        <div className="secondary">No open lobby right now.</div>
+      </Panel>
+    );
+  }
+  const openSeats = Math.max(0, lobby.maxSize - members.length);
+  return (
+    <Panel title="Next match">
+      <div className="lobby-head">
+        <div>
+          <div className="lobby-fill">
+            {members.length} of {lobby.maxSize} seats filled
           </div>
+          <div className="secondary">
+            Match #{String(lobby.id)} · {lobby.auctionType.tag.toLowerCase()}{" "}
+            auction
+          </div>
+        </div>
+        <div>
+          <div className="lobby-timer">
+            {(msUntil(lobby.closesAt, now) / 1000).toFixed(0)}s
+          </div>
+          <div className="secondary">until it starts anyway</div>
+        </div>
+      </div>
+      <div className="seats">
+        {members.map((lm) => {
+          const bot = bots.find((b) => b.id === lm.botId);
+          const sim = !!bot?.isSimulated;
+          return (
+            <span
+              key={String(lm.id)}
+              className={sim ? "seat sim" : "seat"}
+              title={sim ? "simulated" : "real bot"}
+            >
+              {bot?.name ?? `#${lm.botId}`}
+            </span>
+          );
+        })}
+        {Array.from({ length: openSeats }, (_, i) => (
+          <span key={`empty-${i}`} className="seat empty">
+            open seat
+          </span>
         ))}
-      </section>
-    </>
+      </div>
+      <p className="secondary">
+        The match starts when the lobby fills with real bots, or when the timer
+        runs out. Empty seats are filled with simulated bots.
+      </p>
+    </Panel>
+  );
+}
+
+function RecentResults({
+  ended,
+  standingsOf,
+  botName,
+}: {
+  ended: Match[];
+  standingsOf: (m: Match) => MatchParticipant[];
+  botName: BotNames;
+}) {
+  return (
+    <Panel title="Recent results">
+      {ended.length === 0 ? (
+        <div className="secondary">No completed matches yet.</div>
+      ) : (
+        <table className="results">
+          <thead>
+            <tr>
+              <th>Match</th>
+              <th>Winner</th>
+              <th className="num">Points</th>
+              <th className="num">Margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ended.slice(0, 6).map((m) => {
+              const { top, winners, runnerUp } = matchOutcome(standingsOf(m));
+              return (
+                <tr key={String(m.id)}>
+                  <td>
+                    <Link to={`/matches/${m.id}`}>#{String(m.id)}</Link>
+                  </td>
+                  <td className="results-winner">
+                    {winners.length === 0
+                      ? "—"
+                      : winners.map((w) => botName(w.botId)).join(" & ")}
+                  </td>
+                  <td className="num">{String(top)}</td>
+                  <td className="num">
+                    {winners.length > 1
+                      ? "tie"
+                      : runnerUp
+                        ? `+${top - runnerUp.score}`
+                        : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {ended.length > 6 && (
+        <Link to="/matches" className="panel-more">
+          All {ended.length} results
+        </Link>
+      )}
+    </Panel>
   );
 }

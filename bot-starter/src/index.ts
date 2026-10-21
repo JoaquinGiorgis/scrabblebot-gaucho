@@ -1,16 +1,21 @@
 // ScrabbleBot bot starter.
 //
-// First run (claim a credential):
-//   1. From the website, your team mints a nonce. Or from CLI:
-//      `spacetime call scrabblebot mint_credential_nonce`
-//      `spacetime sql 'SELECT code FROM my_nonces ORDER BY expires_at DESC'`
-//   2. Run the bot with the nonce:
-//      `BOT_NONCE=<code> npm start`
-//      The bot connects fresh, redeems the nonce, and persists its token
-//      to .token (so future runs don't need the nonce).
+// First run, with a token from the website:
+//   On your team's page, click "Generate token", then run
+//   `BOT_NAME=<name> BOT_TOKEN=<token> npm start`.
 //
-// Subsequent runs:
-//   `npm start`  -- uses the saved token.
+// Or with a nonce from the CLI:
+//   1. `spacetime call scrabblebot mint_credential_nonce`
+//      `spacetime sql 'SELECT code FROM my_nonces ORDER BY expires_at DESC'`
+//   2. `BOT_NAME=<name> BOT_NONCE=<code> npm start`
+//      The bot connects fresh and redeems the nonce.
+//
+// Either way the bot saves its token to .token-<BOT_NAME>, so later runs
+// need only `BOT_NAME=<name> npm start`.
+//
+// Entering a tournament: `BOT_NAME=<name> TOURNAMENT_ID=<id> npm start`
+// registers the bot for that tournament when it connects. Only the bot
+// itself can register, so this has to come from the bot's process.
 //
 // Edit ./src/strategy.ts to customise how your bot bids and plays words.
 
@@ -27,7 +32,9 @@ import { chooseWord, decideBid } from "./strategy.js";
 const HOST = process.env.STDB_HOST ?? "https://maincloud.spacetimedb.com";
 const DB_NAME = process.env.STDB_DB ?? "scrabblebot";
 const BOT_NAME = process.env.BOT_NAME ?? "bot";
-const BOT_NONCE = process.env.BOT_NONCE; // only used on first run
+const BOT_TOKEN = process.env.BOT_TOKEN; // from the website, first run only
+const BOT_NONCE = process.env.BOT_NONCE; // from the CLI, first run only
+const TOURNAMENT_ID = process.env.TOURNAMENT_ID;
 const TOKEN_PATH = path.join(process.cwd(), `.token-${BOT_NAME}`);
 
 function loadToken(): string | undefined {
@@ -66,13 +73,16 @@ const WORD_RETRY_MS = 500;
 
 function resolveMyBotId(conn: DbConnection): bigint | null {
   if (!myIdentity) return null;
-  const cred = conn.db.bot_credential.identity.find(myIdentity);
+  const cred = conn.db.botCredential.identity.find(myIdentity);
   return cred ? cred.botId : null;
 }
 
-function rackForMatch(conn: DbConnection, matchId: bigint): Map<string, number> {
+function rackForMatch(
+  conn: DbConnection,
+  matchId: bigint,
+): Map<string, number> {
   const rack = new Map<string, number>();
-  for (const h of conn.db.my_rack.iter()) {
+  for (const h of conn.db.myRack.iter()) {
     if (h.matchId !== matchId) continue;
     rack.set(h.letter, (rack.get(h.letter) ?? 0) + h.count);
   }
@@ -84,7 +94,7 @@ function participantForMatch(
   matchId: bigint,
 ): { balance: number; score: number } | null {
   if (myBotId === null) return null;
-  for (const p of conn.db.match_participant.iter()) {
+  for (const p of conn.db.matchParticipant.iter()) {
     if (p.matchId !== matchId) continue;
     if (p.botId !== myBotId) continue;
     return { balance: Number(p.balance), score: Number(p.score) };
@@ -92,7 +102,23 @@ function participantForMatch(
   return null;
 }
 
-function tryBid(conn: DbConnection, auctionId: bigint, matchId: bigint, letter: string) {
+// A reducer call fails when the module refuses it, often for an expected
+// reason: a word played just after its match ended, a bid that missed the
+// auction's window. Log it and keep playing; an uncaught failure would stop
+// the bot.
+function logFailure(what: string) {
+  return (err: unknown) =>
+    console.warn(
+      `[${BOT_NAME}] ${what} failed: ${err instanceof Error ? err.message : err}`,
+    );
+}
+
+function tryBid(
+  conn: DbConnection,
+  auctionId: bigint,
+  matchId: bigint,
+  letter: string,
+) {
   if (myBotId === null) return;
   const key = `${matchId}:${auctionId}`;
   if (bidsByAuction.has(key)) return;
@@ -104,7 +130,9 @@ function tryBid(conn: DbConnection, auctionId: bigint, matchId: bigint, letter: 
     myRack: rackForMatch(conn, matchId),
   });
   if (amount <= 0) return;
-  conn.reducers.submitBid({ auctionId, amount: BigInt(amount) });
+  conn.reducers
+    .submitBid({ auctionId, amount: BigInt(amount) })
+    .catch(logFailure(`bid on auction ${auctionId}`));
   bidsByAuction.add(key);
   console.log(
     `[${BOT_NAME}] bid ${amount} on '${letter}' (match ${matchId}, auction ${auctionId})`,
@@ -113,9 +141,13 @@ function tryBid(conn: DbConnection, auctionId: bigint, matchId: bigint, letter: 
 
 function tryPlayWord(conn: DbConnection) {
   if (myBotId === null) return;
+  // Only matches still being played. The bot keeps its letters from
+  // matches that have ended, but can't play them.
   const matches = new Set<bigint>();
-  for (const p of conn.db.match_participant.iter()) {
-    if (p.botId === myBotId) matches.add(p.matchId);
+  for (const p of conn.db.matchParticipant.iter()) {
+    if (p.botId !== myBotId) continue;
+    const m = conn.db.matchState.id.find(p.matchId);
+    if (m?.status.tag === "Running") matches.add(p.matchId);
   }
   const now = Date.now();
   for (const matchId of matches) {
@@ -128,7 +160,9 @@ function tryPlayWord(conn: DbConnection) {
     });
     if (!word) continue;
     console.log(`[${BOT_NAME}] match ${matchId}: playing '${word}'`);
-    conn.reducers.submitWord({ matchId, word });
+    conn.reducers
+      .submitWord({ matchId, word })
+      .catch(logFailure(`playing '${word}'`));
   }
 }
 
@@ -147,7 +181,9 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
       if (myBotId === null) {
         if (BOT_NONCE) {
           console.log(`[${BOT_NAME}] claiming credential with nonce…`);
-          conn.reducers.claimCredential({ code: BOT_NONCE });
+          conn.reducers
+            .claimCredential({ code: BOT_NONCE })
+            .catch(logFailure("claiming the credential"));
           // Wait briefly for the credential to land; check again.
           setTimeout(() => {
             myBotId = resolveMyBotId(conn);
@@ -166,14 +202,16 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
           return;
         } else {
           console.error(
-            `[${BOT_NAME}] no BotCredential for this token. Set BOT_NONCE and re-run.`,
+            `[${BOT_NAME}] no BotCredential for this token. Set BOT_TOKEN or BOT_NONCE and re-run.`,
           );
           process.exit(1);
         }
       }
 
       const bot = conn.db.bot.id.find(myBotId);
-      console.log(`[${BOT_NAME}] acting as bot '${bot?.name ?? "?"}' (id ${myBotId})`);
+      console.log(
+        `[${BOT_NAME}] acting as bot '${bot?.name ?? "?"}' (id ${myBotId})`,
+      );
       bootstrapActivity(conn);
     })
     .subscribeToAllTables();
@@ -181,12 +219,12 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
   conn.db.auction.onInsert((_ctx: EventContext, a) => {
     if (a.status.tag === "Open") tryBid(conn, a.id, a.matchId, a.letter);
   });
-  conn.db.my_rack.onInsert(() => tryPlayWord(conn));
-  conn.db.my_rack.onUpdate(() => tryPlayWord(conn));
-  conn.db.bot_credential.onInsert(() => {
+  conn.db.myRack.onInsert(() => tryPlayWord(conn));
+  conn.db.myRack.onUpdate(() => tryPlayWord(conn));
+  conn.db.botCredential.onInsert(() => {
     if (myBotId === null) myBotId = resolveMyBotId(conn);
   });
-  conn.db.auction_result.onInsert((_ctx, r) => {
+  conn.db.auctionResult.onInsert((_ctx, r) => {
     if (myBotId === null) return;
     const winner =
       r.winnerBotId !== undefined && r.winnerBotId !== null
@@ -198,10 +236,10 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
   });
 
   // When a match this bot was in ends, hop back into the lobby.
-  conn.db.match_state.onUpdate((_ctx, old, neu) => {
+  conn.db.matchState.onUpdate((_ctx, old, neu) => {
     if (myBotId === null) return;
     if (old.status.tag !== "Ended" && neu.status.tag === "Ended") {
-      const wasIn = Array.from(conn.db.match_participant.iter()).some(
+      const wasIn = Array.from(conn.db.matchParticipant.iter()).some(
         (p) => p.matchId === neu.id && p.botId === myBotId,
       );
       if (wasIn) {
@@ -214,9 +252,9 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
 
 function joinLobby(conn: DbConnection) {
   if (myBotId === null) return;
-  const inRunning = Array.from(conn.db.match_participant.iter()).some((p) => {
+  const inRunning = Array.from(conn.db.matchParticipant.iter()).some((p) => {
     if (p.botId !== myBotId) return false;
-    const m = conn.db.match_state.id.find(p.matchId);
+    const m = conn.db.matchState.id.find(p.matchId);
     return m?.status.tag === "Running";
   });
   if (inRunning) return;
@@ -225,15 +263,23 @@ function joinLobby(conn: DbConnection) {
   );
   const alreadyIn =
     openLobby !== undefined &&
-    Array.from(conn.db.lobby_member.iter()).some(
+    Array.from(conn.db.lobbyMember.iter()).some(
       (lm) => lm.lobbyId === openLobby.id && lm.botId === myBotId,
     );
   if (alreadyIn) return;
   console.log(`[${BOT_NAME}] joining lobby`);
-  conn.reducers.joinLobby({});
+  conn.reducers.joinLobby({}).catch(logFailure("joining the lobby"));
 }
 
 function bootstrapActivity(conn: DbConnection) {
+  if (TOURNAMENT_ID) {
+    conn.reducers
+      .registerForTournament({ tournamentId: BigInt(TOURNAMENT_ID) })
+      .then(() =>
+        console.log(`[${BOT_NAME}] registered for tournament ${TOURNAMENT_ID}`),
+      )
+      .catch(logFailure(`registering for tournament ${TOURNAMENT_ID}`));
+  }
   joinLobby(conn);
   for (const a of conn.db.auction.iter()) {
     if (a.status.tag === "Open") tryBid(conn, a.id, a.matchId, a.letter);
@@ -246,7 +292,7 @@ function main() {
   DbConnection.builder()
     .withUri(HOST)
     .withDatabaseName(DB_NAME)
-    .withToken(loadToken())
+    .withToken(BOT_TOKEN ?? loadToken())
     .onConnect(onConnect)
     .onConnectError((_ctx: ErrorContext, err: Error) =>
       console.error("connect error:", err.message),
