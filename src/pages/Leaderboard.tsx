@@ -1,7 +1,13 @@
 import { Link } from "react-router-dom";
 import { useConn } from "../connection";
-import type { Bot, BotStats } from "../module_bindings/types";
-import { botNames, type BotNames } from "../data";
+import type { Bot, BotStats, RetiredBotStats } from "../module_bindings/types";
+import {
+  botNames,
+  botVersions,
+  liveBotStats,
+  type BotNames,
+  type BotVersions,
+} from "../data";
 import {
   isProvisional,
   PROVISIONAL_ABOVE,
@@ -17,9 +23,16 @@ const MEDAL_COLOURS = ["#fbdc8e", "#ced3e0", "#e0a272"];
 export default function Leaderboard() {
   const { conn } = useConn();
   const bots = conn ? [...conn.db.bot.iter()] : [];
-  const stats = conn ? [...conn.db.botStats.iter()] : [];
+  const stats = liveBotStats(conn);
+  const live = new Set(bots.map((b) => b.id));
+  const retired = conn
+    ? [...conn.db.retiredBotStats.iter()]
+        .filter((r) => live.has(r.botId))
+        .sort((a, b) => skill(b) - skill(a))
+    : [];
   const { ranked, provisional, rankOf } = standings(stats);
   const botName = botNames(conn);
+  const versions = botVersions(conn);
 
   const tiedAt = (rank: number) => ranked.filter((s) => rankOf(s) === rank);
 
@@ -36,10 +49,12 @@ export default function Leaderboard() {
       <RatingsTable
         ranked={ranked}
         provisional={provisional}
+        retired={retired}
         unrated={unrated}
         rankOf={rankOf}
         tiedAt={tiedAt}
         botName={botName}
+        versions={versions}
       />
     </>
   );
@@ -96,17 +111,21 @@ function Podium({
 function RatingsTable({
   ranked,
   provisional,
+  retired,
   unrated,
   rankOf,
   tiedAt,
   botName,
+  versions,
 }: {
   ranked: BotStats[];
   provisional: BotStats[];
+  retired: RetiredBotStats[];
   unrated: Bot[];
   rankOf: (s: BotStats) => number;
   tiedAt: (rank: number) => BotStats[];
   botName: BotNames;
+  versions: BotVersions;
 }) {
   return (
     <Panel full className="table-scroll">
@@ -143,33 +162,40 @@ function RatingsTable({
                 </td>
                 <td className="lb-name">
                   <Link to={`/bots/${s.botId}`}>{botName(s.botId)}</Link>
+                  <Version n={versions.current(s.botId)} />
                 </td>
-                <td
-                  className="num lb-rating"
-                  title={`${rank === null ? `Provisional until the ± is within ${PROVISIONAL_ABOVE} · ` : ""}OpenSkill μ ${s.openskillMu.toFixed(2)}, σ ${s.openskillSigma.toFixed(2)} · Elo ${s.rating}`}
-                >
-                  {skill(s)}
-                  <span className="lb-pm">±{spread(s)}</span>
-                </td>
-                <td className="num lb-opt">{s.matchesPlayed}</td>
-                <td className="num lb-opt">{s.wins}</td>
-                <td className="num">
-                  {s.matchesPlayed > 0
-                    ? `${((s.wins / s.matchesPlayed) * 100).toFixed(0)}%`
-                    : "—"}
-                </td>
-                <td className="num">
-                  {s.matchesPlayed > 0
-                    ? (Number(s.totalScore) / s.matchesPlayed).toFixed(1)
-                    : "—"}
-                </td>
+                <RatingCell
+                  s={s}
+                  note={
+                    rank === null
+                      ? `Provisional until the ± is within ${PROVISIONAL_ABOVE}`
+                      : null
+                  }
+                />
+                <Counts s={s} />
               </tr>
             );
           })}
+          {retired.map((r) => (
+            <tr key={`retired-${r.id}`} className="secondary">
+              <td className="lb-rank">—</td>
+              <td className="lb-name">
+                <Link to={`/bots/${r.botId}?v=${r.version}`}>
+                  {botName(r.botId)}
+                </Link>
+                <Version n={r.version} retired />
+              </td>
+              <RatingCell s={r} note="A retired version" />
+              <Counts s={r} />
+            </tr>
+          ))}
           {unrated.map((b) => (
             <tr key={String(b.id)} className="secondary">
               <td className="lb-rank">—</td>
-              <td className="lb-name">{b.name}</td>
+              <td className="lb-name">
+                {b.name}
+                <Version n={versions.current(b.id)} />
+              </td>
               <td className="num">unrated</td>
               <td className="num lb-opt">0</td>
               <td className="num lb-opt">—</td>
@@ -179,11 +205,64 @@ function RatingsTable({
           ))}
         </tbody>
       </table>
-      {ranked.length + provisional.length + unrated.length === 0 && (
+      {ranked.length + provisional.length + retired.length + unrated.length ===
+        0 && (
         <div className="empty">
           No bots registered yet. <Link to="/team/new">Create a team →</Link>
         </div>
       )}
     </Panel>
+  );
+}
+
+type Stats = Pick<
+  BotStats,
+  | "rating"
+  | "openskillMu"
+  | "openskillSigma"
+  | "matchesPlayed"
+  | "wins"
+  | "totalScore"
+>;
+
+// "v2" after a bot's name. Version 1 goes unmarked unless it's retired.
+function Version({ n, retired }: { n: number; retired?: boolean }) {
+  if (n === 1 && !retired) return null;
+  return (
+    <span className="lb-version">
+      v{n}
+      {retired && " · retired"}
+    </span>
+  );
+}
+
+function RatingCell({ s, note }: { s: Stats; note: string | null }) {
+  return (
+    <td
+      className="num lb-rating"
+      title={`${note ? `${note} · ` : ""}OpenSkill μ ${s.openskillMu.toFixed(2)}, σ ${s.openskillSigma.toFixed(2)} · Elo ${s.rating}`}
+    >
+      {skill(s)}
+      <span className="lb-pm">±{spread(s)}</span>
+    </td>
+  );
+}
+
+function Counts({ s }: { s: Stats }) {
+  return (
+    <>
+      <td className="num lb-opt">{s.matchesPlayed}</td>
+      <td className="num lb-opt">{s.wins}</td>
+      <td className="num">
+        {s.matchesPlayed > 0
+          ? `${((s.wins / s.matchesPlayed) * 100).toFixed(0)}%`
+          : "—"}
+      </td>
+      <td className="num">
+        {s.matchesPlayed > 0
+          ? (Number(s.totalScore) / s.matchesPlayed).toFixed(1)
+          : "—"}
+      </td>
+    </>
   );
 }

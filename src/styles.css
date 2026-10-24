@@ -1292,6 +1292,13 @@ label {
   font-weight: 400;
   font-size: 0.85em;
 }
+.lb-version {
+  margin-left: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
 .lb-name a {
   color: inherit;
   text-decoration-color: var(--border-strong);
@@ -1302,6 +1309,26 @@ label {
 
 /* ---------- Rating chart (bot page) ---------- */
 
+.version-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.version-tabs a {
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-decoration: none;
+}
+.version-tabs a.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-10);
+}
 .chart-caption {
   margin: -4px 0 8px;
 }

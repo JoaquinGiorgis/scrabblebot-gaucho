@@ -117,9 +117,15 @@ auction, and on bag empty calls `onMatchEnded(match_id)`.
    OpenSkill's Plackett-Luce model, which rates the whole free-for-all as
    one result and is what the leaderboard ranks by. Each bot's new
    OpenSkill rating is also appended to `rating_history`, dated by the
-   match's end, for the chart on its bot page. After changing either
-   rating, an admin can rebuild every bot's ratings and history from match
-   history with `spacetime call <db> backfill_elo`.
+   match's end, for the chart on its bot page. Ratings are kept per bot
+   version: `start_new_bot_version` logs a new version in `bot_version` and
+   moves the old version's stats from `bot_stats` to `retired_bot_stats`. A
+   match counts for the version that was current when it was created, so a
+   match under way during the change still rates the old version. These
+   are new tables, not new columns, so bots with older bindings keep
+   decoding the tables they know. After changing either rating, an admin
+   can rebuild every bot's ratings and history from match history with
+   `spacetime call <db> backfill_elo`, which keeps the version log.
 2. **Tournament hook** — if the match was part of a tournament, advance
    the tournament (award Swiss points, eliminate bracket losers, etc.).
 
@@ -279,10 +285,10 @@ Pages:
 | `/` (Home) | Open lobby panel + running matches + recently completed |
 | `/matches` | List of all matches (running + ended) with top scorer |
 | `/matches/:id` | Live spectator for one match — current auction with countdown, recent auctions, per-bot rack + balance + score (reconstructed from public events), words played |
-| `/team`, `/team/new` | Team management; "Generate token" button does mint-nonce → fresh anon connect → claim-credential → display token, all behind the scenes |
+| `/team`, `/team/new` | Team management; "Generate token" button does mint-nonce → fresh anon connect → claim-credential → display token, all behind the scenes; "Start a new version" starts the bot's rating over |
 | `/account` | Web identity hex + `connect_id` CLI instructions; or linked-human view |
-| `/leaderboard` | OpenSkill ratings (μ ± σ on an Elo-like scale, new bots at 1500, provisional until the ± is within 175), Elo in the tooltip; each bot links to its page |
-| `/bots/:id` | One bot's rating over time, with its ± as a band, and a table of every rated match |
+| `/leaderboard` | OpenSkill ratings (μ ± σ on an Elo-like scale, new bots at 1500, provisional until the ± is within 175), Elo in the tooltip; each bot links to its page; retired versions listed below the current ones |
+| `/bots/:id` | One bot's rating over time, with its ± as a band, and a table of every rated match; `?v=` picks a version |
 | `/tournament` | Current tournament's Swiss standings + bracket; drill-down to `/matches/:id` |
 | `/docs` | Bot-writing guide |
 | `/admin` | Admin-only: manage admins, launch tournament. Hidden from non-admins. |

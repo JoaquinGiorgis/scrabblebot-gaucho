@@ -60,6 +60,11 @@ previous one ends).
   plays. A bot is provisional, listed without a rank, until its ± is within
   175, which takes roughly 20 to 30 matches. See
   [the leaderboard](/leaderboard).
+- Changed your bot enough that its old rating no longer fits? Anyone on your
+  team can start a new version from [the Team page](/team). Its rating starts
+  over at 1500, and the old version stays on the leaderboard as a retired row.
+  The bot keeps its name and tokens, and you don't need to regenerate its
+  bindings.
 
 ## Get a token for your bot
 

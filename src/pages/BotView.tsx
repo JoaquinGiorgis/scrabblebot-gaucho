@@ -1,5 +1,6 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useConn } from "../connection";
+import { botVersions, liveBotStats } from "../data";
 import {
   isProvisional,
   PROVISIONAL_ABOVE,
@@ -14,15 +15,33 @@ import { fmtTimestamp, plural, signed } from "../util";
 export default function BotView() {
   const { conn } = useConn();
   const { id } = useParams<{ id: string }>();
+  const [params] = useSearchParams();
   const botId = id && /^\d+$/.test(id) ? BigInt(id) : null;
   if (!conn) return <PageHeader title="Bot…" />;
   const bot = botId === null ? undefined : conn.db.bot.id.find(botId);
   if (!bot) return <PageHeader title="Bot not found" />;
 
-  const stats = conn.db.botStats.botId.find(bot.id);
-  const { ranked, rankOf } = standings([...conn.db.botStats.iter()]);
+  // The version in `?v=`, if the bot has had it, or else the current one.
+  const versions = botVersions(conn);
+  const current = versions.current(bot.id);
+  const asked = Number(params.get("v"));
+  const version =
+    Number.isInteger(asked) && asked >= 1 && asked <= current ? asked : current;
+  const playedBy = (matchId: bigint) => {
+    const m = conn.db.matchState.id.find(matchId);
+    return m ? versions.at(bot.id, fmtTimestamp(m.createdAt)) : 1;
+  };
+
+  const currentStats = conn.db.botStats.botId.find(bot.id);
+  const stats =
+    version === current
+      ? currentStats
+      : [...conn.db.retiredBotStats.iter()].find(
+          (r) => r.botId === bot.id && r.version === version,
+        );
+  const { ranked, rankOf } = standings(liveBotStats(conn));
   const history = [...conn.db.ratingHistory.iter()]
-    .filter((h) => h.botId === bot.id)
+    .filter((h) => h.botId === bot.id && playedBy(h.matchId) === version)
     .sort((a, b) => fmtTimestamp(a.at) - fmtTimestamp(b.at));
   const points: RatingPoint[] = history.map((h) => ({
     at: fmtTimestamp(h.at),
@@ -31,24 +50,42 @@ export default function BotView() {
     matchId: h.matchId,
   }));
 
-  const standing = !stats
-    ? "Unrated"
-    : isProvisional(stats)
-      ? `Provisional until the ± is within ${PROVISIONAL_ABOVE}`
-      : `#${rankOf(stats)} of ${ranked.length}`;
+  const standing =
+    version < current
+      ? "Retired"
+      : !currentStats
+        ? "Unrated"
+        : isProvisional(currentStats)
+          ? `Provisional until the ± is within ${PROVISIONAL_ABOVE}`
+          : `#${rankOf(currentStats)} of ${ranked.length}`;
+  const summary = stats
+    ? `${skill(stats)} ±${spread(stats)} · ${standing} · ${stats.wins} ${plural(stats.wins, "win", "wins")} in ${stats.matchesPlayed} ${plural(stats.matchesPlayed, "match", "matches")}`
+    : standing;
 
   return (
     <>
       <PageHeader
         title={bot.name}
-        subtitle={
-          stats
-            ? `${skill(stats)} ±${spread(stats)} · ${standing} · ${stats.wins} ${plural(stats.wins, "win", "wins")} in ${stats.matchesPlayed} ${plural(stats.matchesPlayed, "match", "matches")}`
-            : standing
-        }
+        subtitle={current > 1 ? `v${version} · ${summary}` : summary}
         status={<Link to="/leaderboard">← Leaderboard</Link>}
       />
       <Panel full title="Rating over time">
+        {current > 1 && (
+          <nav className="version-tabs" aria-label="Versions">
+            {Array.from({ length: current }, (_, i) => i + 1).map((v) => (
+              <Link
+                key={v}
+                to={`?v=${v}`}
+                replace
+                className={v === version ? "active" : undefined}
+                aria-current={v === version ? "page" : undefined}
+              >
+                v{v}
+                {v === current && " (current)"}
+              </Link>
+            ))}
+          </nav>
+        )}
         {points.length > 0 ? (
           <>
             <p className="secondary chart-caption">
@@ -58,7 +95,11 @@ export default function BotView() {
             <MatchTable points={points} />
           </>
         ) : (
-          <div className="empty">No rated matches recorded yet.</div>
+          <div className="empty">
+            {current > 1
+              ? `Version ${version} hasn't finished a rated match yet.`
+              : "No rated matches recorded yet."}
+          </div>
         )}
       </Panel>
     </>

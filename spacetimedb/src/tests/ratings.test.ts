@@ -4,7 +4,11 @@ import { TimeDuration } from "spacetimedb";
 import { expect, test } from "vitest";
 import { updateEloAtMatchEnd } from "../game";
 import { eloRatingPeriod, plackettLuce, type Outcome } from "../ratings";
-import { backfillElo, backfillTopBidArchive } from "../index";
+import {
+  backfillElo,
+  backfillTopBidArchive,
+  startNewBotVersion,
+} from "../index";
 import type { BotStats } from "../schema";
 import {
   byBigint,
@@ -29,8 +33,17 @@ import {
  * rated as the match-end hook would.
  */
 function rate(db: Test, scores: [bigint, bigint][]): bigint {
-  const bots = scores.map(([b]) => b);
-  const m = startMatch(db, VICKREY, bots);
+  const m = startMatch(
+    db,
+    VICKREY,
+    scores.map(([b]) => b),
+  );
+  finish(db, m, scores);
+  return m;
+}
+
+/** Ends match `m` with the given final scores and rates it. */
+function finish(db: Test, m: bigint, scores: [bigint, bigint][]) {
   for (const [bot, score] of scores) {
     const p = participant(db, m, bot);
     db.db.matchParticipant.id.update({ ...p, score });
@@ -42,7 +55,6 @@ function rate(db: Test, scores: [bigint, bigint][]): bigint {
     endedAt: db.clock.now(),
   });
   internal(db, (tx) => updateEloAtMatchEnd(tx, m));
-  return m;
 }
 
 function stats(db: Test, bot: bigint): BotStats {
@@ -450,4 +462,128 @@ test("openskill rates a free-for-all as one result", () => {
   expect(Math.abs(moved.reduce((a, b) => a + b, 0))).toBeLessThan(1e-9);
   // One match shrinks sigma once, not once per opponent.
   for (const r of rated) expect(r.uncertainty).toBeGreaterThan(1.99);
+});
+
+// ---------- Bot versions ----------
+
+const SECOND = new TimeDuration(1_000_000n);
+
+const newVersion = (db: Test, member: string) =>
+  call(db, member, (tx) => startNewBotVersion(tx, {}));
+
+function retired(db: Test, bot: bigint) {
+  return [...db.db.retiredBotStats.retiredByBot.filter(bot)].sort(
+    (a, b) => a.version - b.version,
+  );
+}
+
+test("a new version starts the bot's rating over and keeps the old one", () => {
+  const db = newDb();
+  const ann = teamWithBot(db, "alice", "Ann");
+  const sim = simIds(db)[0]!;
+  rate(db, [
+    [ann, 30n],
+    [sim, 10n],
+  ]);
+  const v1 = stats(db, ann);
+
+  db.clock.advance(SECOND);
+  newVersion(db, "alice");
+  expect(db.db.botStats.botId.find(ann), "v2 hasn't played").toBeNull();
+  const kept = (bot: bigint) =>
+    retired(db, bot).map((r) => [
+      r.version,
+      r.rating,
+      r.openskillMu,
+      r.openskillSigma,
+      r.matchesPlayed,
+    ]);
+  const v1Kept = [
+    [1, v1.rating, v1.openskillMu, v1.openskillSigma, v1.matchesPlayed],
+  ];
+  expect(kept(ann)).toEqual(v1Kept);
+
+  db.clock.advance(SECOND);
+  rate(db, [
+    [ann, 5n],
+    [sim, 10n],
+  ]);
+  const v2 = stats(db, ann);
+  expect([v2.matchesPlayed, v2.wins]).toEqual([1, 0]);
+  expect(v2.openskillMu, "a loss from a fresh 25").toBeLessThan(25);
+  expect(v2.rating, "a loss from a fresh 1000").toBeLessThan(1000);
+  expect(kept(ann), "v1 is left alone").toEqual(v1Kept);
+  expect([...db.db.ratingHistory.historyByBot.filter(ann)]).toHaveLength(2);
+});
+
+test("a match under way when the version changes counts for the old version", () => {
+  const db = newDb();
+  const ann = teamWithBot(db, "alice", "Ann");
+  const sim = simIds(db)[0]!;
+  const m = startMatch(db, VICKREY, [ann, sim]);
+  db.clock.advance(SECOND);
+  newVersion(db, "alice");
+  finish(db, m, [
+    [ann, 30n],
+    [sim, 10n],
+  ]);
+
+  expect(db.db.botStats.botId.find(ann)).toBeNull();
+  expect(
+    retired(db, ann).map((r) => [r.version, r.matchesPlayed, r.wins]),
+  ).toEqual([[1, 1, 1]]);
+});
+
+test("only someone on a team can start a new version", () => {
+  const db = newDb();
+  teamWithBot(db, "alice", "Ann");
+  expect(failure(() => newVersion(db, "mallory"))).toBe(
+    "You're not on a team — create or join one first",
+  );
+  expect([...db.db.botVersion.iter()]).toEqual([]);
+});
+
+test("backfill elo keeps each version's ratings apart", () => {
+  const db = newDb();
+  makeAdmin(db, "alice");
+  const ann = teamWithBot(db, "alice", "Ann");
+  const [s0, s1] = simIds(db) as [bigint, bigint];
+  rate(db, [
+    [ann, 30n],
+    [s0, 10n],
+  ]);
+  db.clock.advance(SECOND);
+  rate(db, [
+    [ann, 10n],
+    [s1, 20n],
+  ]);
+  db.clock.advance(SECOND);
+  newVersion(db, "alice");
+  db.clock.advance(SECOND);
+  rate(db, [
+    [ann, 25n],
+    [s0, 5n],
+  ]);
+
+  // Backfill sets `lastPlayed` to its own time, so leave that out.
+  const key = (s: BotStats) => [
+    s.botId,
+    s.rating,
+    s.matchesPlayed,
+    s.wins,
+    s.totalScore,
+    s.openskillMu,
+    s.openskillSigma,
+  ];
+  const snapshot = () => ({
+    current: [ann, s0, s1].map((b) => key(stats(db, b))),
+    retired: retired(db, ann).map((r) => [r.version, ...key(r)]),
+  });
+  const before = snapshot();
+  expect(before.retired.map((r) => r[0])).toEqual([1]);
+  expect(before.current[0]![2], "v2 played once").toBe(1);
+
+  db.clock.advance(SECOND);
+  call(db, "alice", (tx) => backfillElo(tx, {}));
+  expect(snapshot()).toEqual(before);
 });

@@ -54,6 +54,7 @@ import RegisterSimBotsReducer from "./register_sim_bots_reducer";
 import RemoveAdminReducer from "./remove_admin_reducer";
 import SetMatchmakerConfigReducer from "./set_matchmaker_config_reducer";
 import SpawnSimulatedBotReducer from "./spawn_simulated_bot_reducer";
+import StartNewBotVersionReducer from "./start_new_bot_version_reducer";
 import StartNextFinalsMatchReducer from "./start_next_finals_match_reducer";
 import StartTournamentReducer from "./start_tournament_reducer";
 import SubmitBidReducer from "./submit_bid_reducer";
@@ -70,6 +71,7 @@ import AuctionTopBidArchiveRow from "./auction_top_bid_archive_table";
 import BotRow from "./bot_table";
 import BotCredentialRow from "./bot_credential_table";
 import BotStatsRow from "./bot_stats_table";
+import BotVersionRow from "./bot_version_table";
 import HumanLinkRow from "./human_link_table";
 import LobbyRow from "./lobby_table";
 import LobbyMemberRow from "./lobby_member_table";
@@ -81,6 +83,7 @@ import MyNoncesRow from "./my_nonces_table";
 import MyRackRow from "./my_rack_table";
 import MyTeamRow from "./my_team_table";
 import RatingHistoryRow from "./rating_history_table";
+import RetiredBotStatsRow from "./retired_bot_stats_table";
 import TeamRow from "./team_table";
 import TeamMemberRow from "./team_member_table";
 import TournamentRow from "./tournament_table";
@@ -192,6 +195,20 @@ const tablesSchema = __schema({
       { name: 'bot_stats_bot_id_key', constraint: 'unique', columns: ['botId'] },
     ],
   }, BotStatsRow),
+  botVersion: __table({
+    name: 'bot_version',
+    indexes: [
+      { accessor: 'versionByBot', name: 'bot_version_bot_id_idx_btree', algorithm: 'btree', columns: [
+        'botId',
+      ] },
+      { accessor: 'id', name: 'bot_version_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'bot_version_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, BotVersionRow),
   humanLink: __table({
     name: 'human_link',
     indexes: [
@@ -293,6 +310,20 @@ const tablesSchema = __schema({
       { name: 'rating_history_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RatingHistoryRow),
+  retiredBotStats: __table({
+    name: 'retired_bot_stats',
+    indexes: [
+      { accessor: 'retiredByBot', name: 'retired_bot_stats_bot_id_idx_btree', algorithm: 'btree', columns: [
+        'botId',
+      ] },
+      { accessor: 'id', name: 'retired_bot_stats_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'retired_bot_stats_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, RetiredBotStatsRow),
   team: __table({
     name: 'team',
     indexes: [
@@ -447,6 +478,7 @@ const reducersSchema = __reducers(
   __reducerSchema("remove_admin", RemoveAdminReducer),
   __reducerSchema("set_matchmaker_config", SetMatchmakerConfigReducer),
   __reducerSchema("spawn_simulated_bot", SpawnSimulatedBotReducer),
+  __reducerSchema("start_new_bot_version", StartNewBotVersionReducer),
   __reducerSchema("start_next_finals_match", StartNextFinalsMatchReducer),
   __reducerSchema("start_tournament", StartTournamentReducer),
   __reducerSchema("submit_bid", SubmitBidReducer),

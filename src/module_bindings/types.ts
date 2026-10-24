@@ -124,6 +124,14 @@ export const BotStrategy = __t.enum("BotStrategy", {
 });
 export type BotStrategy = __Infer<typeof BotStrategy>;
 
+export const BotVersion = __t.object("BotVersion", {
+  id: __t.u64(),
+  botId: __t.u64(),
+  version: __t.u32(),
+  startedAt: __t.timestamp(),
+});
+export type BotVersion = __Infer<typeof BotVersion>;
+
 export const CredentialNonce = __t.object("CredentialNonce", {
   id: __t.u64(),
   code: __t.string(),
@@ -268,6 +276,20 @@ export const RatingHistory = __t.object("RatingHistory", {
   openskillSigma: __t.f64(),
 });
 export type RatingHistory = __Infer<typeof RatingHistory>;
+
+export const RetiredBotStats = __t.object("RetiredBotStats", {
+  id: __t.u64(),
+  botId: __t.u64(),
+  version: __t.u32(),
+  rating: __t.i32(),
+  matchesPlayed: __t.u32(),
+  wins: __t.u32(),
+  totalScore: __t.i64(),
+  lastPlayed: __t.option(__t.timestamp()),
+  openskillMu: __t.f64(),
+  openskillSigma: __t.f64(),
+});
+export type RetiredBotStats = __Infer<typeof RetiredBotStats>;
 
 export const Team = __t.object("Team", {
   id: __t.u64(),

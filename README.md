@@ -63,6 +63,7 @@ schedule them. Bots that finish a match just call `join_lobby()` again.
   an Elo-like scale where new bots start at 1500, with a ± for how unsure
   it is. A bot is provisional, without a rank, until its ± is within 175.
   It updates at every match end. An Elo rating (K=32) is kept alongside it.
+  A team can start a new version of its bot to start the rating over.
 
 ## Writing a bot (5-minute version)
 
