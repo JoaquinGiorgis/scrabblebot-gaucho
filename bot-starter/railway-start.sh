@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 VOL=${RAILWAY_VOLUME_MOUNT_PATH:-/data}
 mkdir -p "$VOL/data" "$VOL/params"
 # Sembrar el volumen con los campeones de la imagen solo la primera vez.
-for f in params/*.json; do [ -e "$f" ] && { [ ! -e "$VOL/$f" ] || [ "${SEED_PARAMS:-}" = "force" ]; } && cp "$f" "$VOL/$f"; done
+for f in params/*.json; do [ -e "$f" ] && { [ ! -s "$VOL/$f" ] || [ "${SEED_PARAMS:-}" = "force" ]; } && cp "$f" "$VOL/$f"; done
 rm -rf data params && ln -s "$VOL/data" data && ln -s "$VOL/params" params
 # Política aceptada por el asesor LLM (vive en el volumen, no en la imagen).
 [ -f "$VOL/policy.ts" ] && cp "$VOL/policy.ts" src/core/policy.ts
