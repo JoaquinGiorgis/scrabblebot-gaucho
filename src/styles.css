@@ -269,7 +269,8 @@ pre {
 }
 
 /* Copyable text: tokens, identities, commands. */
-.code-block {
+.code-block,
+.docs pre {
   display: block;
   margin: 0 0 8px;
   padding: 12px;

@@ -9,3 +9,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare module "virtual:bot-guide" {
+  export const title: string;
+  export const html: string;
+}
