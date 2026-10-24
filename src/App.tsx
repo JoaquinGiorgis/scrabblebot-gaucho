@@ -24,7 +24,7 @@ import Tournament from "./pages/Tournament";
 import Admin from "./pages/Admin";
 
 function Nav() {
-  const { conn, identity, connected, dbName } = useConn();
+  const { conn, identity, connected, dbName, loadError } = useConn();
   const link = humanLinkOf(conn, identity);
 
   // On narrow screens the links scroll sideways; keep the current page's
@@ -60,8 +60,24 @@ function Nav() {
           </a>
         </div>
         <span className="conn-state">
-          <span title={connected ? "Connected" : "Disconnected"}>
-            <span className={connected ? "conn-dot on" : "conn-dot"} />
+          <span
+            title={
+              loadError
+                ? "Connected, but the data didn't load"
+                : connected
+                  ? "Connected"
+                  : "Disconnected"
+            }
+          >
+            <span
+              className={
+                loadError
+                  ? "conn-dot failed"
+                  : connected
+                    ? "conn-dot on"
+                    : "conn-dot"
+              }
+            />
             <span className="conn-db">{dbName}</span>
           </span>
           {link ? (
@@ -79,12 +95,26 @@ function Nav() {
   );
 }
 
+// Without this the site just looks empty when its data fails to load.
+function LoadError() {
+  const { loadError } = useConn();
+  if (!loadError) return null;
+  return (
+    <div className="load-error full" role="alert">
+      <strong>The site couldn't load its data.</strong> This usually means the
+      site was updated before the database. Try reloading in a minute.
+      <code>{loadError}</code>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ConnectionProvider>
       <BrowserRouter>
         <Nav />
         <div className="page">
+          <LoadError />
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/matches" element={<Matches />} />

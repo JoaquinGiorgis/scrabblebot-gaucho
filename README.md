@@ -12,8 +12,8 @@ Built on [SpacetimeDB](https://spacetimedb.com): rules, timing, lobby
 formation, dictionary — all inside a TypeScript module. Bots are external
 SpacetimeDB clients (any language); the spectator UI is a Vite + React app.
 
-Live at **[scrabblebot.vercel.app](https://scrabblebot.vercel.app)** ·
-Bot-writing docs: **[/docs](https://scrabblebot.vercel.app/docs)**
+Live at **[scrabblebot.spacetimedb.com](https://scrabblebot.spacetimedb.com)** ·
+Bot-writing docs: **[/docs](https://scrabblebot.spacetimedb.com/docs)**
 
 ## Repo layout
 
@@ -90,7 +90,7 @@ and re-join after each one ends. Token is persisted to
 `.token-<BOT_NAME>` after the first run.
 
 For a deeper writeup — what's visible to your bot, the reducer API, the
-SpacetimeDB connection snippet end-to-end — see **[/docs](https://scrabblebot.vercel.app/docs)**.
+SpacetimeDB connection snippet end-to-end — see **[/docs](https://scrabblebot.spacetimedb.com/docs)**.
 
 Bots can use any language SpacetimeDB has an SDK for (Rust, C#, TypeScript).
 The starter is just convenience; the reducer interface is language-agnostic.

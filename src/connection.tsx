@@ -20,6 +20,8 @@ interface Ctx {
   version: number; // bumps on any table change so subscribers re-render
   connected: boolean;
   dbName: string;
+  // Why the subscription failed, if it did. The site then has no data.
+  loadError: string | null;
 }
 
 const ConnectionContext = createContext<Ctx>({
@@ -28,6 +30,7 @@ const ConnectionContext = createContext<Ctx>({
   version: 0,
   connected: false,
   dbName: DB_NAME,
+  loadError: null,
 });
 
 export function useConn() {
@@ -39,6 +42,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   const [conn, setConn] = useState<DbConnection | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [connected, setConnected] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const versionRef = useRef(0);
 
@@ -79,7 +83,19 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         if (!idToken) localStorage.setItem("scrabblebot-token", freshToken);
         setIdentity(id);
         setConnected(true);
-        c.subscriptionBuilder().onApplied(bump).subscribeToAllTables();
+        // Every table is in one subscription, so a single bad query fails
+        // all of them: say, a table this build expects that the database
+        // hasn't been published with yet.
+        c.subscriptionBuilder()
+          .onApplied(() => {
+            setLoadError(null);
+            bump();
+          })
+          .onError((ctx) => {
+            console.error("subscription error:", ctx.event);
+            setLoadError(ctx.event?.message ?? "The subscription failed");
+          })
+          .subscribeToAllTables();
         for (const t of [
           c.db.bot,
           c.db.botStats,
@@ -144,7 +160,14 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
 
   return (
     <ConnectionContext.Provider
-      value={{ conn, identity, version, connected, dbName: DB_NAME }}
+      value={{
+        conn,
+        identity,
+        version,
+        connected,
+        dbName: DB_NAME,
+        loadError,
+      }}
     >
       {children}
     </ConnectionContext.Provider>
