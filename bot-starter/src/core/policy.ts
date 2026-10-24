@@ -31,6 +31,8 @@ export interface Params {
   floorMult: number; // 0 = apagado; si vamos atrasados, pujar >= floorMult * precio de mercado
   letterTarget: number; // letras que queremos ganar en la partida
   slack: number; // cuántas letras de atraso toleramos antes de activar el piso
+  // horizonte: escala la escasez por la fracción de no-vistas que aún saldrán a subasta
+  horizonW: number; // 0 = apagado (campeón)
 }
 
 export const DEFAULT_PARAMS: Params = {
@@ -50,6 +52,7 @@ export const DEFAULT_PARAMS: Params = {
   floorMult: 0,
   letterTarget: 14,
   slack: 2,
+  horizonW: 0,
 };
 
 // Rangos para el optimizador: [min, max, entero?]
@@ -70,6 +73,7 @@ export const BOUNDS: Record<keyof Params, [number, number, boolean]> = {
   floorMult: [0, 1.5, false],
   letterTarget: [8, 20, false],
   slack: [0, 5, false],
+  horizonW: [0, 2, false],
 };
 
 export interface View {
@@ -86,11 +90,20 @@ export interface View {
 function opts(p: Params, v: View): PotentialOpts {
   // No pedimos más letras de las que quedan por subastar.
   const horizon = Math.max(0, Math.min(p.maxMissing, v.auctionsLeft));
+  // Escalar u por f (fracción de no-vistas que saldrá a subasta) equivale a
+  // pBase*u/(u + aHalf/f): mantenemos unseen entero y ajustamos aHalf.
+  let aHalf = p.aHalf;
+  if (p.horizonW > 0) {
+    let U = 0;
+    for (let i = 0; i < 26; i++) U += v.unseen[i]!;
+    const f = U > 0 ? Math.min(1, Math.max(0.02, v.auctionsLeft / U)) : 1;
+    aHalf = p.aHalf / Math.pow(f, p.horizonW);
+  }
   return {
     unseen: v.unseen,
     maxMissing: horizon,
     pBase: p.pBase,
-    aHalf: p.aHalf,
+    aHalf,
     minLen: p.minLen,
   };
 }
