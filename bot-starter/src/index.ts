@@ -28,6 +28,16 @@ const TOKEN_PATH = path.join(process.cwd(), `.token-${BOT_NAME}`);
 const MATCH_LOG = path.join(process.cwd(), "data", "matches.jsonl");
 
 const dict = loadDict();
+// Si el asesor reemplaza policy.ts, reiniciamos entre partidas para cargarla.
+const POLICY_FILE = path.join(process.cwd(), "src", "core", "policy.ts");
+const policyMtime = () => {
+  try {
+    return fs.statSync(POLICY_FILE).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+const POLICY_MTIME_AT_START = policyMtime();
 const log = (...a: unknown[]) => console.log(`[${BOT_NAME}]`, ...a);
 
 // ---------- parámetros con recarga en caliente ----------
@@ -272,6 +282,10 @@ function onConnect(conn: DbConnection, identity: Identity, token: string) {
       dumpMatch(conn, neu.id); // tras esperar el archivo de pujas máximas
       matchSubs.get(neu.id)?.unsubscribe();
       matchSubs.delete(neu.id);
+      if (policyMtime() !== POLICY_MTIME_AT_START) {
+        log("policy.ts cambió: reinicio para cargar la versión nueva");
+        process.exit(0);
+      }
     }, 3000);
     joinLobby(conn);
   });

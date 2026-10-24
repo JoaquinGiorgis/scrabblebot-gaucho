@@ -126,7 +126,12 @@ export function unseenFor(seat: Seat, m: MatchInfo): Int32Array {
   return u;
 }
 
-export function policyAgent(p: Params, name = "Policy", d = loadDict()): Agent {
+export interface PolicyImpl {
+  decideBid: typeof decideBid;
+  chooseWords: typeof chooseWords;
+}
+
+export function policyAgent(p: Params, name = "Policy", d = loadDict(), impl: PolicyImpl = { decideBid, chooseWords }): Agent {
   const view = (seat: Seat, m: MatchInfo) => ({
     rack: seat.rack,
     balance: seat.balance,
@@ -137,8 +142,8 @@ export function policyAgent(p: Params, name = "Policy", d = loadDict()): Agent {
   return {
     name,
     isSim: false,
-    bid: (seat, m, letter) => decideBid(d, p, view(seat, m), letter),
-    words: (seat, m) => chooseWords(d, p, view(seat, m)),
+    bid: (seat, m, letter) => impl.decideBid(d, p, view(seat, m), letter),
+    words: (seat, m) => impl.chooseWords(d, p, view(seat, m)),
   };
 }
 

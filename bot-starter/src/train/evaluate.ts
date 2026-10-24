@@ -1,7 +1,7 @@
 // Evaluación de un set de parámetros sobre escenarios de mesa mixtos.
 
 import { type Params } from "../core/policy.js";
-import { playMatch, policyAgent, rng, simAgent, type Agent } from "../sim/engine.js";
+import { playMatch, policyAgent, rng, simAgent, type Agent, type PolicyImpl } from "../sim/engine.js";
 import { loadMarket, marketAgent, MARKET_SCALE } from "../sim/market.js";
 import { DEFAULT_PARAMS } from "../core/policy.js";
 
@@ -10,6 +10,7 @@ export interface EvalJob {
   league: Params[]; // campeones previos (incluye el actual)
   seeds: number[];
   firstPrice: boolean;
+  candModule?: string; // ruta a una variante de policy.ts (asesor LLM)
 }
 
 export interface EvalOut {
@@ -30,8 +31,8 @@ function jittered(p: Params, seed: number, k: number): Params {
 
 // Escenario según la semilla. El lobby real es 6 bots reales cuyos precios
 // reproduce bien el self-play (ver sim/calibrate.ts), así que pesa más.
-export function table(seed: number, cand: Params, league: Params[]): Agent[] {
-  const me = policyAgent(cand, "cand");
+export function table(seed: number, cand: Params, league: Params[], impl?: PolicyImpl): Agent[] {
+  const me = policyAgent(cand, "cand", undefined, impl);
   const md = loadMarket();
   const lg = league.length ? league : [DEFAULT_PARAMS];
   const pick = (k: number) => lg[(seed * 7919 + k * 104729) % lg.length]!;
@@ -45,10 +46,10 @@ export function table(seed: number, cand: Params, league: Params[]): Agent[] {
   return [me, ...others];
 }
 
-export function evaluate(job: EvalJob): EvalOut {
+export function evaluate(job: EvalJob, impl?: PolicyImpl): EvalOut {
   let place = 0, win = 0, margin = 0;
   for (const s of job.seeds) {
-    const r = playMatch(table(s, job.cand, job.league), s, job.firstPrice);
+    const r = playMatch(table(s, job.cand, job.league, impl), s, job.firstPrice);
     place += r.places[0]! + 1;
     if (r.places[0] === 0) win++;
     margin += r.scores[0]! - Math.max(...r.scores.slice(1));
