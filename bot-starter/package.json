@@ -7,7 +7,13 @@
     "generate": "npm install --prefix ../spacetimedb && spacetime generate --lang typescript --out-dir src/module_bindings --module-path ../spacetimedb",
     "start": "tsx src/index.ts",
     "test": "node --import tsx --test src/strategy.test.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "bench": "tsx src/sim/bench.ts",
+    "evolve": "tsx src/train/evolve.ts",
+    "learn": "tsx src/train/learn.ts",
+    "advisor": "tsx src/train/advisor.ts",
+    "improve": "./improve.sh",
+    "play": "./play.sh"
   },
   "dependencies": {
     "spacetimedb": "^2.12.0",

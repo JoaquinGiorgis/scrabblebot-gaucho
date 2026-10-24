@@ -1,0 +1,47 @@
+[
+  {
+    "pBase": 0.853,
+    "aHalf": 1.383,
+    "maxMissing": 3,
+    "minLen": 2,
+    "alpha": 1.709,
+    "beta": 1.479,
+    "gamma": 3.246,
+    "pace": 0.738,
+    "shade": 0.611,
+    "holdKappa": 0.967,
+    "minPlayReward": 35.426,
+    "flushAt": 2,
+    "lowCash": 7.126
+  },
+  {
+    "pBase": 0.571,
+    "aHalf": 0.922,
+    "maxMissing": 3,
+    "minLen": 3,
+    "alpha": 1.548,
+    "beta": 1.179,
+    "gamma": 1.646,
+    "pace": 0.305,
+    "shade": 0.601,
+    "holdKappa": 1.034,
+    "minPlayReward": 18.342,
+    "flushAt": 3,
+    "lowCash": 6.66
+  },
+  {
+    "pBase": 0.55,
+    "aHalf": 1.5,
+    "maxMissing": 3,
+    "minLen": 4,
+    "alpha": 1,
+    "beta": 1,
+    "gamma": 0.5,
+    "pace": 0.3,
+    "shade": 0.7,
+    "holdKappa": 1,
+    "minPlayReward": 12,
+    "flushAt": 2,
+    "lowCash": 6
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "pBase": 0.853,
+  "aHalf": 1.383,
+  "maxMissing": 3,
+  "minLen": 2,
+  "alpha": 1.709,
+  "beta": 1.479,
+  "gamma": 3.246,
+  "pace": 0.738,
+  "shade": 0.611,
+  "holdKappa": 0.967,
+  "minPlayReward": 35.426,
+  "flushAt": 2,
+  "lowCash": 7.126
+}

@@ -1,0 +1,4 @@
+**/node_modules
+.git
+bot-starter/data
+bot-starter/.token-*
