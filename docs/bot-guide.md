@@ -129,7 +129,7 @@ lifecycle). Edit `src/strategy.ts` — it has two functions you'll want to tune:
   dictionary.
 
 ```sh
-git clone <repo>
+git clone https://github.com/clockworklabs/scrabblebot
 cd scrabblebot/bot-starter
 npm install
 npm run generate

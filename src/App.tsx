@@ -50,6 +50,13 @@ function Nav() {
           <NavLink to="/team">Team</NavLink>
           <NavLink to="/docs">Docs</NavLink>
           {amAdmin(conn) && <NavLink to="/admin">Admin</NavLink>}
+          <a
+            href="https://github.com/clockworklabs/scrabblebot"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub ↗
+          </a>
         </div>
         <span className="conn-state">
           <span title={connected ? "Connected" : "Disconnected"}>
