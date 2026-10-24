@@ -2,47 +2,25 @@ import { Link } from "react-router-dom";
 import { useConn } from "../connection";
 import type { Bot, BotStats } from "../module_bindings/types";
 import { botNames, type BotNames } from "../data";
-import { competitionRank } from "../util";
+import {
+  isProvisional,
+  PROVISIONAL_ABOVE,
+  skill,
+  spread,
+  standings,
+} from "../rating";
 import { PageHeader, Panel } from "../ui";
 
 const MEDALS = ["gold", "silver", "bronze"];
 const MEDAL_COLOURS = ["#fbdc8e", "#ced3e0", "#e0a272"];
 
-// What a new bot is rated, before its first match.
-const NEW_BOT = 1500;
-// Rating points per point of μ, chosen so that, as in Elo, 400 points
-// between two settled bots means 10:1 odds head to head: 400 / (ln 10 · β√2),
-// with OpenSkill's β = 25/6.
-const ELO_SCALE = 400 / (Math.LN10 * (25 / 6) * Math.SQRT2);
-// A bot gets a rank once its ± is this narrow, which takes roughly 20 to 30
-// matches. Until then it's listed below the ranked bots as provisional.
-const PROVISIONAL_ABOVE = 175;
-
-// OpenSkill's μ on that Elo-like scale, where a new bot's μ of 25 is 1500.
-function skill(s: BotStats): number {
-  return Math.round(NEW_BOT + ELO_SCALE * (s.openskillMu - 25));
-}
-
-// OpenSkill's σ on the same scale, shown as the ± after the rating.
-function spread(s: BotStats): number {
-  return Math.round(ELO_SCALE * s.openskillSigma);
-}
-
-function isProvisional(s: BotStats): boolean {
-  return spread(s) > PROVISIONAL_ABOVE;
-}
-
 export default function Leaderboard() {
   const { conn } = useConn();
   const bots = conn ? [...conn.db.bot.iter()] : [];
   const stats = conn ? [...conn.db.botStats.iter()] : [];
-  stats.sort((a, b) => skill(b) - skill(a));
-  const ranked = stats.filter((s) => !isProvisional(s));
-  const provisional = stats.filter(isProvisional);
+  const { ranked, provisional, rankOf } = standings(stats);
   const botName = botNames(conn);
 
-  // Bots on the same rating share a rank (1, 2, 3, 3, 3, 6).
-  const rankOf = competitionRank(ranked, skill);
   const tiedAt = (rank: number) => ranked.filter((s) => rankOf(s) === rank);
 
   const rated = new Set(stats.map((s) => s.botId));
@@ -163,7 +141,9 @@ function RatingsTable({
                     />
                   )}
                 </td>
-                <td className="lb-name">{botName(s.botId)}</td>
+                <td className="lb-name">
+                  <Link to={`/bots/${s.botId}`}>{botName(s.botId)}</Link>
+                </td>
                 <td
                   className="num lb-rating"
                   title={`${rank === null ? `Provisional until the ± is within ${PROVISIONAL_ABOVE} · ` : ""}OpenSkill μ ${s.openskillMu.toFixed(2)}, σ ${s.openskillSigma.toFixed(2)} · Elo ${s.rating}`}

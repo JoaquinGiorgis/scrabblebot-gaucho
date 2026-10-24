@@ -80,6 +80,7 @@ import MyAdminRow from "./my_admin_table";
 import MyNoncesRow from "./my_nonces_table";
 import MyRackRow from "./my_rack_table";
 import MyTeamRow from "./my_team_table";
+import RatingHistoryRow from "./rating_history_table";
 import TeamRow from "./team_table";
 import TeamMemberRow from "./team_member_table";
 import TournamentRow from "./tournament_table";
@@ -278,6 +279,20 @@ const tablesSchema = __schema({
       { name: 'matchmaker_config_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, MatchmakerConfigRow),
+  ratingHistory: __table({
+    name: 'rating_history',
+    indexes: [
+      { accessor: 'historyByBot', name: 'rating_history_bot_id_idx_btree', algorithm: 'btree', columns: [
+        'botId',
+      ] },
+      { accessor: 'id', name: 'rating_history_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'rating_history_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, RatingHistoryRow),
   team: __table({
     name: 'team',
     indexes: [

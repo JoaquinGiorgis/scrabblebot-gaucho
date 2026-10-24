@@ -1,5 +1,6 @@
 // ELO and OpenSkill (Plackett-Luce) updates at match end, and the backfills.
 
+import { TimeDuration } from "spacetimedb";
 import { expect, test } from "vitest";
 import { updateEloAtMatchEnd } from "../game";
 import { eloRatingPeriod, plackettLuce, type Outcome } from "../ratings";
@@ -135,6 +136,35 @@ test("a solo match is not rated", () => {
   const a = simIds(db)[0]!;
   rate(db, [[a, 30n]]);
   expect(db.db.botStats.botId.find(a)).toBeNull();
+  expect([...db.db.ratingHistory.iter()]).toEqual([]);
+});
+
+test("each rated match records every bot's new rating, dated by its end", () => {
+  const db = newDb();
+  const [a, b] = simIds(db) as [bigint, bigint];
+  const first = rate(db, [
+    [a, 30n],
+    [b, 10n],
+  ]);
+  const ended = getMatch(db, first).endedAt;
+  db.clock.advance(new TimeDuration(60_000_000n));
+  const second = rate(db, [
+    [a, 5n],
+    [b, 10n],
+  ]);
+
+  const history = [...db.db.ratingHistory.historyByBot.filter(a)].sort((x, y) =>
+    byBigint(x.matchId, y.matchId),
+  );
+  expect(history.map((h) => h.matchId)).toEqual([first, second]);
+  expect(history[0]!.at).toEqual(ended);
+  expect(history[1]!.at).toEqual(getMatch(db, second).endedAt);
+  const s = stats(db, a);
+  expect([history[1]!.openskillMu, history[1]!.openskillSigma]).toEqual([
+    s.openskillMu,
+    s.openskillSigma,
+  ]);
+  expect([...db.db.ratingHistory.historyByBot.filter(b)]).toHaveLength(2);
 });
 
 test("finishing a real match rates everyone in it", () => {
@@ -166,12 +196,30 @@ test("backfill elo replays history to the same result", () => {
   const live = [...db.db.botStats.iter()].sort((a, b) =>
     byBigint(a.botId, b.botId),
   );
+  const history = () =>
+    [...db.db.ratingHistory.iter()]
+      .map((h) => [h.matchId, h.botId, h.at, h.openskillMu, h.openskillSigma])
+      .sort((x, y) =>
+        x[0] === y[0]
+          ? byBigint(x[1] as bigint, y[1] as bigint)
+          : byBigint(x[0] as bigint, y[0] as bigint),
+      );
+  const liveHistory = history();
+  expect(liveHistory).toHaveLength(
+    live.reduce((n, s) => n + s.matchesPlayed, 0),
+  );
 
-  // Corrupt the stats, then rebuild them.
+  // Corrupt the stats and history, then rebuild them.
   for (const s of live) {
     db.db.botStats.botId.update({ ...s, rating: 1, wins: 99 });
   }
+  const stray = db.db.ratingHistory.iter().next().value!;
+  db.db.ratingHistory.insert({ ...stray, id: 0n, openskillMu: 99 });
+  db.clock.advance(new TimeDuration(60_000_000n));
   call(db, "alice", (tx) => backfillElo(tx, {}));
+  expect(history(), "dated by each match's end, not the backfill").toEqual(
+    liveHistory,
+  );
 
   const rebuilt = [...db.db.botStats.iter()].sort((a, b) =>
     byBigint(a.botId, b.botId),

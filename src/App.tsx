@@ -18,6 +18,7 @@ import Account from "./pages/Account";
 import Team from "./pages/Team";
 import TeamNew from "./pages/TeamNew";
 import Leaderboard from "./pages/Leaderboard";
+import BotView from "./pages/BotView";
 import Docs from "./pages/Docs";
 import Tournament from "./pages/Tournament";
 import Admin from "./pages/Admin";
@@ -96,6 +97,7 @@ export default function App() {
               element={<Navigate to="/team/new" replace />}
             />
             <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/bots/:id" element={<BotView />} />
             <Route path="/docs" element={<Docs />} />
             <Route path="/tournament" element={<Tournament />} />
             <Route path="/admin" element={<Admin />} />

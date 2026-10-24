@@ -259,6 +259,16 @@ export const PendingBid = __t.object("PendingBid", {
 });
 export type PendingBid = __Infer<typeof PendingBid>;
 
+export const RatingHistory = __t.object("RatingHistory", {
+  id: __t.u64(),
+  botId: __t.u64(),
+  matchId: __t.u64(),
+  at: __t.timestamp(),
+  openskillMu: __t.f64(),
+  openskillSigma: __t.f64(),
+});
+export type RatingHistory = __Infer<typeof RatingHistory>;
+
 export const Team = __t.object("Team", {
   id: __t.u64(),
   name: __t.string(),

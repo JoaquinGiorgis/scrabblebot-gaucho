@@ -530,6 +530,27 @@ export const botStats = table(
 );
 export type BotStats = Infer<typeof botStats.rowType>;
 
+// A bot's OpenSkill rating just after each match it was rated in, for the
+// rating-over-time chart. `at` is when the match ended. `backfillElo`
+// rebuilds it along with `botStats`.
+export const ratingHistory = table(
+  {
+    public: true,
+    indexes: [
+      { accessor: "historyByBot", algorithm: "btree", columns: ["botId"] },
+    ],
+  },
+  t.row("RatingHistory", {
+    id: t.u64().primaryKey().autoInc(),
+    botId: t.u64(),
+    matchId: t.u64(),
+    at: t.timestamp(),
+    openskillMu: t.f64(),
+    openskillSigma: t.f64(),
+  }),
+);
+export type RatingHistory = Infer<typeof ratingHistory.rowType>;
+
 export const tournament = table(
   { public: true },
   t.row("Tournament", {
@@ -622,6 +643,7 @@ const spacetimedb = schema({
   wordPlay,
   auctionSchedule,
   botStats,
+  ratingHistory,
   tournament,
   tournamentEntry,
   tournamentMatch,

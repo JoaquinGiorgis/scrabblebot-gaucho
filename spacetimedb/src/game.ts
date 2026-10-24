@@ -400,6 +400,8 @@ export function updateEloAtMatchEnd(ctx: Ctx, matchId: bigint) {
     return;
   }
   sortDescending(placed, (p) => p.score);
+  // The match's own end time, so a backfill dates history rows correctly.
+  const endedAt = ctx.db.matchState.id.find(matchId)?.endedAt ?? ctx.timestamp;
 
   // Snapshot all ratings before any updates
   const snapshots = placed.map((p) => getOrInitStats(ctx, p.botId));
@@ -443,6 +445,14 @@ export function updateEloAtMatchEnd(ctx: Ctx, matchId: bigint) {
     } else {
       ctx.db.botStats.insert(stats);
     }
+    ctx.db.ratingHistory.insert({
+      id: 0n,
+      botId: p.botId,
+      matchId,
+      at: endedAt,
+      openskillMu: stats.openskillMu,
+      openskillSigma: stats.openskillSigma,
+    });
   });
 }
 
