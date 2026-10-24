@@ -1,8 +1,8 @@
-// ELO and OpenSkill (Weng-Lin) updates at match end, and the backfills.
+// ELO and OpenSkill (Plackett-Luce) updates at match end, and the backfills.
 
 import { expect, test } from "vitest";
 import { updateEloAtMatchEnd } from "../game";
-import { eloRatingPeriod, wengLinRatingPeriod, type Outcome } from "../ratings";
+import { eloRatingPeriod, plackettLuce, type Outcome } from "../ratings";
 import { backfillElo, backfillTopBidArchive } from "../index";
 import type { BotStats } from "../schema";
 import {
@@ -229,80 +229,177 @@ test("backfill top bid archive moves ended matches in chunks", () => {
 // Outputs of the Rust `skillratings` 0.29.2 crate, compiled to WebAssembly
 // as the Rust module was, for the same inputs. The TypeScript port must
 // reproduce them exactly, to the last bit.
-test("ratings match the rust skillratings crate", () => {
-  type Opponent = [elo: number, mu: number, sigma: number, outcome: Outcome];
+test("elo matches the rust skillratings crate", () => {
+  type Opponent = [elo: number, outcome: Outcome];
   const cases: {
-    player: [elo: number, mu: number, sigma: number];
+    player: number;
     opponents: Opponent[];
     elo: number;
-    mu: number;
-    sigma: number;
   }[] = [
     {
-      player: [1000, 25, 8.333333333333334],
-      opponents: [[1000, 25, 8.333333333333334, "WIN"]],
+      player: 1000,
+      opponents: [[1000, "WIN"]],
       elo: 1016,
-      mu: 27.63523138347365,
-      sigma: 8.065506316323548,
     },
     {
-      player: [1016, 27.63523138347365, 8.065506316323548],
-      opponents: [[984, 22.36476861652635, 8.065506316323548, "LOSS"]],
+      player: 1016,
+      opponents: [[984, "LOSS"]],
       elo: 998.5304984710245,
-      mu: 24.5888998262643,
-      sigma: 7.82210295723689,
     },
     {
-      player: [1213, 31.2, 4.1],
+      player: 1213,
       opponents: [
-        [1187, 29.9, 5.3, "DRAW"],
-        [1402, 35.1, 2.2, "LOSS"],
-        [955, 20.4, 7.7, "WIN"],
+        [1187, "DRAW"],
+        [1402, "LOSS"],
+        [955, "WIN"],
       ],
       elo: 1209.9509615343452,
-      mu: 30.740742342360203,
-      sigma: 3.952693254815325,
     },
     {
-      player: [870, 18.75, 6.25],
+      player: 870,
       opponents: [
-        [1105, 26.5, 3.5, "WIN"],
-        [990, 24.25, 4.75, "WIN"],
-        [1320, 33, 1.5, "WIN"],
-        [1001, 25.1, 8, "DRAW"],
-        [760, 15, 6.9, "WIN"],
+        [1105, "WIN"],
+        [990, "WIN"],
+        [1320, "WIN"],
+        [1001, "DRAW"],
+        [760, "WIN"],
       ],
       elo: 955.5175038267862,
-      mu: 27.48549521904071,
-      sigma: 5.51138031966475,
     },
     {
-      player: [1500, 40, 0.9],
+      player: 1500,
       opponents: [
-        [600, 5, 8.3, "LOSS"],
-        [650, 7.5, 8.1, "LOSS"],
+        [600, "LOSS"],
+        [650, "LOSS"],
       ],
       elo: 1436.4645761552208,
-      mu: 39.8457751336324,
-      sigma: 0.8999787441444734,
     },
   ];
   for (const c of cases) {
     const elo = eloRatingPeriod(
-      { rating: c.player[0] },
-      c.opponents.map(([rating, , , outcome]) => [{ rating }, outcome]),
+      { rating: c.player },
+      c.opponents.map(([rating, outcome]) => [{ rating }, outcome]),
     );
-    const wl = wengLinRatingPeriod(
-      { rating: c.player[1], uncertainty: c.player[2] },
-      c.opponents.map(([, rating, uncertainty, outcome]) => [
-        { rating, uncertainty },
-        outcome,
-      ]),
-    );
-    expect([elo.rating, wl.rating, wl.uncertainty]).toEqual([
-      c.elo,
-      c.mu,
-      c.sigma,
-    ]);
+    expect(elo.rating).toEqual(c.elo);
   }
+});
+
+// Outputs of the `openskill` npm package (4.1.1), whose default `rate` is
+// Plackett-Luce, for the same matches. Its `Math.exp` can differ from ours
+// in the last bit, so these agree to 12 places rather than exactly.
+test("openskill matches the openskill package", () => {
+  type Player = [mu: number, sigma: number, place: number];
+  const cases: {
+    players: Player[];
+    expected: [mu: number, sigma: number][];
+  }[] = [
+    {
+      players: [
+        [25, 8.333333333333334, 0],
+        [25, 8.333333333333334, 1],
+      ],
+      expected: [
+        [27.63523138347365, 8.065506316323548],
+        [22.36476861652635, 8.065506316323548],
+      ],
+    },
+    {
+      players: [
+        [25, 8.333333333333334, 0],
+        [25, 8.333333333333334, 0],
+      ],
+      expected: [
+        [25, 8.065506316323548],
+        [25, 8.065506316323548],
+      ],
+    },
+    {
+      players: [
+        [51.6, 1.39, 0],
+        [48.98, 1.82, 1],
+        [44.5, 1.43, 2],
+        [47, 1.26, 3],
+        [25, 8.333333333333334, 4],
+        [11.75, 1.62, 5],
+      ],
+      expected: [
+        [51.69931652742782, 1.3898441755955127],
+        [49.07676902295709, 1.8190951040801187],
+        [44.52574788199967, 1.4295220758946592],
+        [46.90885433969147, 1.2596001391778169],
+        [24.594558820432937, 7.825955570845122],
+        [11.671374228654924, 1.6195528695360948],
+      ],
+    },
+    {
+      players: [
+        [30.2, 4.1, 0],
+        [35.1, 2.2, 1],
+        [35.1, 2.2, 1],
+        [20.4, 7.7, 3],
+        [26, 6, 4],
+      ],
+      expected: [
+        [31.1340321038928, 4.092559321355726],
+        [35.0588299257802, 2.1983409165504844],
+        [35.0588299257802, 2.1983409165504844],
+        [21.92162992070921, 7.438680918074243],
+        [23.688229780304862, 5.88777193976909],
+      ],
+    },
+    {
+      players: [
+        [18.75, 6.25, 0],
+        [40, 0.9, 0],
+        [33, 1.5, 2],
+        [25.1, 8, 2],
+        [15, 6.9, 2],
+        [24.25, 4.75, 5],
+      ],
+      expected: [
+        [19.695118575713256, 6.236044597193379],
+        [40.00787346134852, 0.8999843896595591],
+        [32.9624405871058, 1.4997785867111788],
+        [24.912494906750556, 7.866447296209009],
+        [15.352852102169289, 6.855051760001233],
+        [23.76030753859052, 4.734127644049885],
+      ],
+    },
+  ];
+  for (const c of cases) {
+    const rated = plackettLuce(
+      c.players.map(([rating, uncertainty, place]) => ({
+        rating,
+        uncertainty,
+        place,
+      })),
+    );
+    rated.forEach((r, i) => {
+      const [mu, sigma] = c.expected[i]!;
+      expect(r.rating).toBeCloseTo(mu, 12);
+      expect(r.uncertainty).toBeCloseTo(sigma, 12);
+    });
+  }
+});
+
+test("openskill rates a free-for-all as one result", () => {
+  const players = [40, 35, 30, 25, 20, 15].map((rating, place) => ({
+    rating,
+    uncertainty: 2,
+    place,
+  }));
+  const rated = plackettLuce(players);
+  // An upset at the top: the bottom seed wins, everyone else keeps order.
+  const upset = plackettLuce(
+    players.map((p, i) => ({ ...p, place: i === 5 ? 0 : p.place + 1 })),
+  );
+  const favourite = rated[0]!.rating - 40;
+  const underdog = upset[5]!.rating - 15;
+  expect(favourite, "an expected win earns less than an upset").toBeLessThan(
+    underdog,
+  );
+  const moved = rated.map((r, i) => r.rating - players[i]!.rating);
+  expect(Math.abs(moved.reduce((a, b) => a + b, 0))).toBeLessThan(1e-9);
+  // One match shrinks sigma once, not once per opponent.
+  for (const r of rated) expect(r.uncertainty).toBeGreaterThan(1.99);
 });

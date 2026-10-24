@@ -975,7 +975,8 @@ export const startNextFinalsMatch = spacetimedb.reducer(
 
 // ---------- ELO ----------
 
-// Resets all BotStats and replays ELO across every ended match in chronological order.
+// Resets all BotStats and replays both ratings across every ended match in
+// chronological order.
 export const backfillElo = spacetimedb.reducer((ctx) => {
   requireAdmin(ctx);
 

@@ -1279,7 +1279,14 @@ label {
 }
 .lb-rating {
   font-weight: 600;
+  white-space: nowrap;
   cursor: help;
+}
+.lb-pm {
+  margin-left: 4px;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.85em;
 }
 
 .rank-dot {

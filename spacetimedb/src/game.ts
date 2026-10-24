@@ -10,10 +10,9 @@ import { identityFromClaims } from "./identity";
 import { DEFAULT_BAG, lengthMultiplier, letterValue } from "./letters";
 import {
   eloRatingPeriod,
-  wengLinRatingPeriod,
+  plackettLuce,
   type EloRating,
   type Outcome,
-  type WengLinRating,
 } from "./ratings";
 import type spacetimedb from "./schema";
 import type {
@@ -405,10 +404,14 @@ export function updateEloAtMatchEnd(ctx: Ctx, matchId: bigint) {
   // Snapshot all ratings before any updates
   const snapshots = placed.map((p) => getOrInitStats(ctx, p.botId));
   const preElo: EloRating[] = snapshots.map((s) => ({ rating: s.rating }));
-  const preWl: WengLinRating[] = snapshots.map((s) => ({
-    rating: s.openskillMu,
-    uncertainty: s.openskillSigma,
-  }));
+  // OpenSkill rates the match as one result, everyone at once.
+  const newWl = plackettLuce(
+    snapshots.map((s, idx) => ({
+      rating: s.openskillMu,
+      uncertainty: s.openskillSigma,
+      place: placed.findIndex((p) => p.score === placed[idx]!.score),
+    })),
+  );
 
   placed.forEach((p, idx) => {
     const others = placed
@@ -418,14 +421,9 @@ export function updateEloAtMatchEnd(ctx: Ctx, matchId: bigint) {
       ([other, j]) =>
         [preElo[j]!, outcome(p.score, other.score)] as [EloRating, Outcome],
     );
-    const wlResults = others.map(
-      ([other, j]) =>
-        [preWl[j]!, outcome(p.score, other.score)] as [WengLinRating, Outcome],
-    );
 
     const newElo = eloRatingPeriod(preElo[idx]!, eloResults);
     const newRating = Math.max(roundToI32(newElo.rating), 0);
-    const newWl = wengLinRatingPeriod(preWl[idx]!, wlResults);
 
     const existing = getOrInitStats(ctx, p.botId);
     // Everyone tied on the top score shares the win.
@@ -433,8 +431,8 @@ export function updateEloAtMatchEnd(ctx: Ctx, matchId: bigint) {
     const stats: BotStats = {
       ...existing,
       rating: newRating,
-      openskillMu: newWl.rating,
-      openskillSigma: newWl.uncertainty,
+      openskillMu: newWl[idx]!.rating,
+      openskillSigma: newWl[idx]!.uncertainty,
       matchesPlayed: existing.matchesPlayed + 1,
       wins: existing.wins + (wasWin ? 1 : 0),
       totalScore: existing.totalScore + p.score,

@@ -59,7 +59,10 @@ schedule them. Bots that finish a match just call `join_lobby()` again.
   [ENABLE](https://en.wikipedia.org/wiki/Moby_Project#ENABLE) wordlist
   (~173k words), embedded from `spacetimedb/wordlist.txt`. Swap in TWL or
   SOWPODS if you have a license.
-- **Rating:** per-bot ELO updates pairwise at every match end (K=32).
+- **Rating:** the leaderboard ranks by OpenSkill (Plackett-Luce), shown on
+  an Elo-like scale where new bots start at 1500, with a ± for how unsure
+  it is. A bot is provisional, without a rank, until its ± is within 175.
+  It updates at every match end. An Elo rating (K=32) is kept alongside it.
 
 ## Writing a bot (5-minute version)
 
@@ -121,7 +124,7 @@ bot pool on every fresh database init.
 
 `/admin` (admin-only) has a tournament launcher: Swiss rounds → top-N cut →
 single-elimination bracket → best-of-3 finals. Match size, Swiss round
-count, and top cut are configurable. ELO ratings are updated independently
+count, and top cut are configurable. Ratings are updated independently
 of tournament standings.
 
 ## Known limitations

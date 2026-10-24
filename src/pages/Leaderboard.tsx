@@ -8,16 +8,42 @@ import { PageHeader, Panel } from "../ui";
 const MEDALS = ["gold", "silver", "bronze"];
 const MEDAL_COLOURS = ["#fbdc8e", "#ced3e0", "#e0a272"];
 
+// What a new bot is rated, before its first match.
+const NEW_BOT = 1500;
+// Rating points per point of μ, chosen so that, as in Elo, 400 points
+// between two settled bots means 10:1 odds head to head: 400 / (ln 10 · β√2),
+// with OpenSkill's β = 25/6.
+const ELO_SCALE = 400 / (Math.LN10 * (25 / 6) * Math.SQRT2);
+// A bot gets a rank once its ± is this narrow, which takes roughly 20 to 30
+// matches. Until then it's listed below the ranked bots as provisional.
+const PROVISIONAL_ABOVE = 175;
+
+// OpenSkill's μ on that Elo-like scale, where a new bot's μ of 25 is 1500.
+function skill(s: BotStats): number {
+  return Math.round(NEW_BOT + ELO_SCALE * (s.openskillMu - 25));
+}
+
+// OpenSkill's σ on the same scale, shown as the ± after the rating.
+function spread(s: BotStats): number {
+  return Math.round(ELO_SCALE * s.openskillSigma);
+}
+
+function isProvisional(s: BotStats): boolean {
+  return spread(s) > PROVISIONAL_ABOVE;
+}
+
 export default function Leaderboard() {
   const { conn } = useConn();
   const bots = conn ? [...conn.db.bot.iter()] : [];
   const stats = conn ? [...conn.db.botStats.iter()] : [];
-  stats.sort((a, b) => b.rating - a.rating);
+  stats.sort((a, b) => skill(b) - skill(a));
+  const ranked = stats.filter((s) => !isProvisional(s));
+  const provisional = stats.filter(isProvisional);
   const botName = botNames(conn);
 
   // Bots on the same rating share a rank (1, 2, 3, 3, 3, 6).
-  const rankOf = competitionRank(stats, (s) => s.rating);
-  const tiedAt = (rank: number) => stats.filter((s) => rankOf(s) === rank);
+  const rankOf = competitionRank(ranked, skill);
+  const tiedAt = (rank: number) => ranked.filter((s) => rankOf(s) === rank);
 
   const rated = new Set(stats.map((s) => s.botId));
   const unrated = bots.filter((b) => !rated.has(b.id));
@@ -30,7 +56,8 @@ export default function Leaderboard() {
       />
       <Podium tiedAt={tiedAt} botName={botName} />
       <RatingsTable
-        stats={stats}
+        ranked={ranked}
+        provisional={provisional}
         unrated={unrated}
         rankOf={rankOf}
         tiedAt={tiedAt}
@@ -76,7 +103,7 @@ function Podium({
             <div className="step-block">
               <div className="step-rank">{rank}</div>
               <div className="step-rating">
-                {holders[0].rating}
+                {skill(holders[0])}
                 <span>rating</span>
               </div>
             </div>
@@ -89,13 +116,15 @@ function Podium({
 }
 
 function RatingsTable({
-  stats,
+  ranked,
+  provisional,
   unrated,
   rankOf,
   tiedAt,
   botName,
 }: {
-  stats: BotStats[];
+  ranked: BotStats[];
+  provisional: BotStats[];
   unrated: Bot[];
   rankOf: (s: BotStats) => number;
   tiedAt: (rank: number) => BotStats[];
@@ -116,17 +145,17 @@ function RatingsTable({
           </tr>
         </thead>
         <tbody>
-          {stats.map((s) => {
-            const rank = rankOf(s);
-            const tied = tiedAt(rank).length > 1;
-            const mu = s.openskillMu;
-            const sigma = s.openskillSigma;
+          {[...ranked, ...provisional].map((s) => {
+            const rank = isProvisional(s) ? null : rankOf(s);
+            const tied = rank !== null && tiedAt(rank).length > 1;
             return (
-              <tr key={String(s.botId)}>
+              <tr
+                key={String(s.botId)}
+                className={rank === null ? "secondary" : undefined}
+              >
                 <td className="lb-rank">
-                  {tied ? "=" : ""}
-                  {rank}
-                  {rank <= 3 && (
+                  {rank === null ? "—" : `${tied ? "=" : ""}${rank}`}
+                  {rank !== null && rank <= 3 && (
                     <span
                       className="rank-dot"
                       style={{ background: MEDAL_COLOURS[rank - 1] }}
@@ -137,9 +166,10 @@ function RatingsTable({
                 <td className="lb-name">{botName(s.botId)}</td>
                 <td
                   className="num lb-rating"
-                  title={`OpenSkill μ ${mu.toFixed(2)}, σ ${sigma.toFixed(2)} (conservative ${(mu - 3 * sigma).toFixed(2)})`}
+                  title={`${rank === null ? `Provisional until the ± is within ${PROVISIONAL_ABOVE} · ` : ""}OpenSkill μ ${s.openskillMu.toFixed(2)}, σ ${s.openskillSigma.toFixed(2)} · Elo ${s.rating}`}
                 >
-                  {s.rating}
+                  {skill(s)}
+                  <span className="lb-pm">±{spread(s)}</span>
                 </td>
                 <td className="num lb-opt">{s.matchesPlayed}</td>
                 <td className="num lb-opt">{s.wins}</td>
@@ -169,7 +199,7 @@ function RatingsTable({
           ))}
         </tbody>
       </table>
-      {stats.length + unrated.length === 0 && (
+      {ranked.length + provisional.length + unrated.length === 0 && (
         <div className="empty">
           No bots registered yet. <Link to="/team/new">Create a team →</Link>
         </div>
