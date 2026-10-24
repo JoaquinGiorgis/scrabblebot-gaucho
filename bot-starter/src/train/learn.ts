@@ -76,3 +76,20 @@ const lines = [
 ];
 fs.writeFileSync("data/report.md", lines.join("\n") + "\n");
 console.log(lines.join("\n"));
+
+// Tabla de precios de mercado por letra y fase para la política (piso de puja).
+{
+  const hist = "data/history.jsonl";
+  if (fs.existsSync(hist)) {
+    const paid: number[][][] = Array.from({ length: 26 }, () => Array.from({ length: 5 }, () => []));
+    for (const l of fs.readFileSync(hist, "utf8").split("\n").filter(Boolean).slice(-600)) {
+      const r = JSON.parse(l);
+      const n = r.auctions.length;
+      r.auctions.forEach((a: { paid: number; letter: string; winner: string | null }, k: number) => {
+        if (a.winner) paid[idx(a.letter)]![Math.min(4, Math.floor((k * 5) / n))]!.push(a.paid);
+      });
+    }
+    const med = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1]! : 0);
+    fs.writeFileSync("data/market-prices.json", JSON.stringify(paid.map((ps) => ps.map(med))));
+  }
+}

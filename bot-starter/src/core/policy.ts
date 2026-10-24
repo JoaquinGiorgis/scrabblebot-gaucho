@@ -8,6 +8,7 @@ import {
   type Dict,
   type PotentialOpts,
 } from "./dict.js";
+import { phaseOf } from "./prices.js";
 import { type Rack, VALUE } from "./rules.js";
 
 export interface Params {
@@ -26,6 +27,10 @@ export interface Params {
   minPlayReward: number; // nunca jugar palabras que paguen menos
   flushAt: number; // vaciar todo cuando quedan <= flushAt subastas
   lowCash: number; // por debajo, jugar algo para tener plata
+  // piso de puja según el ritmo de compra
+  floorMult: number; // 0 = apagado; si vamos atrasados, pujar >= floorMult * precio de mercado
+  letterTarget: number; // letras que queremos ganar en la partida
+  slack: number; // cuántas letras de atraso toleramos antes de activar el piso
 }
 
 export const DEFAULT_PARAMS: Params = {
@@ -42,6 +47,9 @@ export const DEFAULT_PARAMS: Params = {
   minPlayReward: 12,
   flushAt: 2,
   lowCash: 6,
+  floorMult: 0,
+  letterTarget: 14,
+  slack: 2,
 };
 
 // Rangos para el optimizador: [min, max, entero?]
@@ -59,6 +67,9 @@ export const BOUNDS: Record<keyof Params, [number, number, boolean]> = {
   minPlayReward: [0, 40, false],
   flushAt: [1, 6, true],
   lowCash: [0, 30, false],
+  floorMult: [0, 1.5, false],
+  letterTarget: [8, 20, false],
+  slack: [0, 5, false],
 };
 
 export interface View {
@@ -67,6 +78,9 @@ export interface View {
   unseen: Int32Array; // fichas que todavía pueden salir: bolsa - subastadas (incl. la actual) - mi atril inicial
   auctionsLeft: number; // subastas después de la actual
   firstPrice: boolean;
+  won?: number; // letras ganadas en esta partida
+  round?: number; // número de subasta actual (1-based)
+  market?: number[][] | null; // [letra][fase] precio pagado mediano
 }
 
 function opts(p: Params, v: View): PotentialOpts {
@@ -92,6 +106,17 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
   const delta = Math.max(0, after - before);
   const spend = v.balance / Math.max(1, v.auctionsLeft);
   let bid = p.alpha * delta + p.beta * VALUE[letter]! + p.gamma + p.pace * spend;
+  // Atrasados en letras: no dejar pasar letras útiles por debajo del mercado.
+  if (p.floorMult > 0 && v.market && v.won !== undefined && v.round !== undefined) {
+    const total = v.round + v.auctionsLeft;
+    const behind = v.won < (p.letterTarget * v.round) / total - p.slack;
+    let size = 0;
+    for (let i = 0; i < 26; i++) size += v.rack[i]!;
+    if (behind && (delta > 0 || size < 8)) {
+      const mk = v.market[letter]?.[phaseOf(v.round, total)] ?? 0;
+      bid = Math.max(bid, p.floorMult * mk + 1);
+    }
+  }
   if (v.firstPrice) bid *= p.shade;
   bid = Math.floor(bid);
   return Math.max(0, Math.min(bid, v.balance));

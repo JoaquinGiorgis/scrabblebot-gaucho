@@ -11,5 +11,8 @@
   "holdKappa": 0.934,
   "minPlayReward": 37.988,
   "flushAt": 1,
-  "lowCash": 9.939
+  "lowCash": 9.939,
+  "floorMult": 0.9,
+  "letterTarget": 14,
+  "slack": 2
 }

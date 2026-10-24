@@ -2,7 +2,7 @@
 //   MARKET_SCALE=1 MARKET_SPREAD=0.45 npx tsx src/sim/calibrate.ts
 import { VALUE } from "../core/rules.js";
 import { playMatch, type Agent, type MatchResult } from "./engine.js";
-import { loadMarket, marketAgent, MARKET_SCALE, MARKET_SPREAD } from "./market.js";
+import { hybridAgent, loadMarket, marketAgent, MARKET_SCALE, MARKET_SPREAD } from "./market.js";
 import * as fs from "node:fs";
 import { DEFAULT_PARAMS } from "../core/policy.js";
 import { policyAgent } from "./engine.js";
@@ -14,7 +14,7 @@ const tops: number[][] = Array.from({ length: 26 }, () => []);
 const paids: number[][] = Array.from({ length: 26 }, () => []);
 const winners: number[] = [];
 for (let s = 0; s < N; s++) {
-  const agents: Agent[] = Array.from({ length: 6 }, (_, k) => (RIVAL ? policyAgent(RIVAL, `P${k}`) : marketAgent(md, MARKET_SCALE, MARKET_SPREAD, `M${k}`)));
+  const agents: Agent[] = Array.from({ length: 6 }, (_, k) => (process.env.HYBRID && RIVAL ? hybridAgent(md, RIVAL, `H${k}`, Number(process.env.HYBRID)) : RIVAL ? policyAgent(RIVAL, `P${k}`) : marketAgent(md, MARKET_SCALE, MARKET_SPREAD, `M${k}`)));
   // Interceptar pujas para medir top/pagado.
   const log: { letter: number; bids: number[] }[] = [];
   const wrapped = agents.map((a, i) => ({

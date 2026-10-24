@@ -2,7 +2,7 @@
 
 import { type Params } from "../core/policy.js";
 import { playMatch, policyAgent, rng, simAgent, type Agent, type PolicyImpl } from "../sim/engine.js";
-import { loadMarket, marketAgent, MARKET_SCALE } from "../sim/market.js";
+import { hybridAgent, loadMarket, marketAgent, MARKET_SCALE } from "../sim/market.js";
 import { DEFAULT_PARAMS } from "../core/policy.js";
 
 export interface EvalJob {
@@ -41,6 +41,8 @@ export function table(seed: number, cand: Params, league: Params[], impl?: Polic
   for (let k = 0; k < 5; k++) {
     if (kind === 7) others.push(simAgent(SIM_KINDS[(seed + k) % 6]!));
     else if (md && (kind === 5 || (kind === 6 && k < 2))) others.push(marketAgent(md, MARKET_SCALE, 0.3, `M${k}`));
+    // Rivales híbridos: eligen por necesidad pero pujan al menos como el mercado real.
+    else if (md && kind <= 3) others.push(hybridAgent(md, jittered(pick(k), seed, k), `H${k}`, 0.4));
     else others.push(policyAgent(jittered(pick(k), seed, k), `L${k}`));
   }
   return [me, ...others];

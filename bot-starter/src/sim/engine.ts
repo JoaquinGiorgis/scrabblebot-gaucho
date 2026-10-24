@@ -4,6 +4,7 @@
 
 import { type Dict, loadDict } from "../core/dict.js";
 import { decideBid, chooseWords, type Params } from "../core/policy.js";
+import { marketPrices } from "../core/prices.js";
 import {
   BAG,
   BAG_SIZE,
@@ -28,6 +29,7 @@ export type Rng = () => number;
 const randInt = (r: Rng, lo: number, hi: number) => lo + Math.floor(r() * (hi - lo + 1));
 
 export interface Seat {
+  won: number;
   rack: Int32Array;
   balance: number;
   score: number;
@@ -138,6 +140,9 @@ export function policyAgent(p: Params, name = "Policy", d = loadDict(), impl: Po
     unseen: unseenFor(seat, m),
     auctionsLeft: m.auctionsLeft,
     firstPrice: m.firstPrice,
+    won: seat.won,
+    round: m.round,
+    market: marketPrices(),
   });
   return {
     name,
@@ -186,6 +191,7 @@ export function playMatch(
     throw new Error("bag");
   };
   const seats: Seat[] = agents.map(() => ({
+    won: 0,
     rack: new Int32Array(26),
     balance: STARTING_BALANCE,
     score: 0,
@@ -232,6 +238,7 @@ export function playMatch(
       if (s.balance >= paid) {
         s.balance -= paid;
         s.rack[letter]!++;
+        s.won++;
         const a = agents[first.i]!;
         if (a.isSim && a.onWin) {
           const w = a.onWin(s, m);
