@@ -1,5 +1,23 @@
 [
   {
+    "pBase": 0.938,
+    "aHalf": 1.043,
+    "maxMissing": 4,
+    "minLen": 3,
+    "alpha": 0.937,
+    "beta": 1.93,
+    "gamma": 3.128,
+    "pace": 1.224,
+    "shade": 0.674,
+    "holdKappa": 0.894,
+    "minPlayReward": 40,
+    "flushAt": 1,
+    "lowCash": 9.537,
+    "floorMult": 0.966,
+    "letterTarget": 11.806,
+    "slack": 1.671
+  },
+  {
     "pBase": 0.933,
     "aHalf": 1.178,
     "maxMissing": 4,
