@@ -34,6 +34,7 @@ export interface Seat {
   balance: number;
   score: number;
   start: Int32Array;
+  pub: Int32Array; // lo que los demás pueden saber de su atril: ganadas - jugadas
 }
 
 export interface MatchInfo {
@@ -42,6 +43,7 @@ export interface MatchInfo {
   auctionsLeft: number;
   round: number;
   players: number;
+  pubs?: Int32Array[]; // atriles públicos de todos los asientos
 }
 
 export interface Agent {
@@ -143,6 +145,7 @@ export function policyAgent(p: Params, name = "Policy", d = loadDict(), impl: Po
     won: seat.won,
     round: m.round,
     market: marketPrices(),
+    opp: m.pubs?.filter((r) => r !== seat.pub),
   });
   return {
     name,
@@ -162,7 +165,10 @@ function playWord(seat: Seat, w: string): boolean {
   const need = new Int32Array(26);
   for (const c of w) need[c.charCodeAt(0) - 65]!++;
   for (let i = 0; i < 26; i++) if (need[i]! > seat.rack[i]!) return false;
-  for (let i = 0; i < 26; i++) seat.rack[i]! -= need[i]!;
+  for (let i = 0; i < 26; i++) {
+    seat.rack[i]! -= need[i]!;
+    seat.pub[i] = Math.max(0, seat.pub[i]! - need[i]!);
+  }
   const rw = wordReward(w);
   seat.balance += rw;
   seat.score += rw;
@@ -196,6 +202,7 @@ export function playMatch(
     balance: STARTING_BALANCE,
     score: 0,
     start: new Int32Array(26),
+    pub: new Int32Array(26),
   }));
   for (const s of seats)
     for (let n = 0; n < STARTING_RACK; n++) {
@@ -209,6 +216,7 @@ export function playMatch(
     auctionsLeft: 0,
     round: 0,
     players: agents.length,
+    pubs: seats.map((s) => s.pub),
   };
   while (bagTotal > 0) {
     const letter = draw();
@@ -238,6 +246,7 @@ export function playMatch(
       if (s.balance >= paid) {
         s.balance -= paid;
         s.rack[letter]!++;
+        s.pub[letter]!++;
         s.won++;
         const a = agents[first.i]!;
         if (a.isSim && a.onWin) {

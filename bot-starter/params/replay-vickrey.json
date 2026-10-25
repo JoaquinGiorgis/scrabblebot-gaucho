@@ -1,0 +1,23 @@
+{
+  "pBase": 0.95,
+  "aHalf": 0.439,
+  "maxMissing": 3,
+  "minLen": 3,
+  "alpha": 0.953,
+  "beta": 1.755,
+  "gamma": 2.811,
+  "pace": 0.878,
+  "shade": 0.566,
+  "holdKappa": 0.853,
+  "minPlayReward": 40,
+  "flushAt": 1,
+  "lowCash": 4.513,
+  "floorMult": 0.91,
+  "letterTarget": 13.109,
+  "slack": 2.322,
+  "horizonW": 0.986,
+  "endN": 0,
+  "allIn": 1,
+  "c0": 0.301,
+  "c1": 0.098
+}

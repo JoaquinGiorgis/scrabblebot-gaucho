@@ -32,7 +32,16 @@ export interface Params {
   letterTarget: number; // letras que queremos ganar en la partida
   slack: number; // cuántas letras de atraso toleramos antes de activar el piso
   // horizonte: escala la escasez por la fracción de no-vistas que aún saldrán a subasta
-  horizonW: number; // 0 = apagado (campeón)
+  horizonW: number; // 0 = apagado
+  // multiplicador del peso facial cuando la letra no mejora el potencial (1 = campeón)
+  idleBeta: number;
+  // final de partida y ritmo de gasto
+  endN: number; // en las últimas endN subastas, valuar por el mejor vaciado final exacto (0 = apagado)
+  allIn: number; // 1 = en la última ficha jugable, pujar todo si suma al vaciado final
+  c0: number; // puja *= e^c0 * (saldo por subasta restante / 3)^c1
+  c1: number;
+  // bloqueo: pujar al menos denyW x lo que la letra le suma a la mejor palabra de un rival
+  denyW: number; // 0 = apagado
 }
 
 export const DEFAULT_PARAMS: Params = {
@@ -53,6 +62,12 @@ export const DEFAULT_PARAMS: Params = {
   letterTarget: 14,
   slack: 2,
   horizonW: 0,
+  idleBeta: 1,
+  endN: 0,
+  allIn: 0,
+  c0: 0,
+  c1: 0,
+  denyW: 0,
 };
 
 // Rangos para el optimizador: [min, max, entero?]
@@ -74,6 +89,12 @@ export const BOUNDS: Record<keyof Params, [number, number, boolean]> = {
   letterTarget: [8, 20, false],
   slack: [0, 5, false],
   horizonW: [0, 2, false],
+  idleBeta: [0, 1.5, false],
+  endN: [0, 12, true],
+  allIn: [0, 1, true],
+  c0: [-1, 1, false],
+  c1: [0, 1.2, false],
+  denyW: [0, 2, false],
 };
 
 export interface View {
@@ -85,6 +106,7 @@ export interface View {
   won?: number; // letras ganadas en esta partida
   round?: number; // número de subasta actual (1-based)
   market?: number[][] | null; // [letra][fase] precio pagado mediano
+  opp?: Int32Array[]; // atriles públicos de los rivales (ganadas - jugadas)
 }
 
 function opts(p: Params, v: View): PotentialOpts {
@@ -116,9 +138,18 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
   const r2 = new Int32Array(v.rack);
   r2[letter]!++;
   const after = potential(d, r2, o);
-  const delta = Math.max(0, after - before);
+  let delta = Math.max(0, after - before);
   const spend = v.balance / Math.max(1, v.auctionsLeft);
-  let bid = p.alpha * delta + p.beta * VALUE[letter]! + p.gamma + p.pace * spend;
+  // Final: lo que la letra suma al mejor conjunto de palabras jugable al cierre.
+  if (v.auctionsLeft <= p.endN || (p.allIn >= 1 && v.auctionsLeft === 1)) {
+    const dump = bestPartition(d, r2).score - bestPartition(d, v.rack).score;
+    if (p.allIn >= 1 && v.auctionsLeft === 1) return dump > 0 ? v.balance : 0;
+    delta = Math.max(0, dump);
+  }
+  // Letra ociosa (no mejora ningún objetivo): su valor facial pesa menos.
+  const faceW = delta > 0 ? p.beta : p.beta * p.idleBeta;
+  let bid = p.alpha * delta + faceW * VALUE[letter]! + p.gamma + p.pace * spend;
+  if (p.c0 !== 0 || p.c1 !== 0) bid *= Math.exp(p.c0) * Math.pow(Math.max(0.1, spend) / 3, p.c1);
   // Atrasados en letras: no dejar pasar letras útiles por debajo del mercado.
   if (p.floorMult > 0 && v.market && v.won !== undefined && v.round !== undefined) {
     const total = v.round + v.auctionsLeft;
@@ -130,9 +161,27 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
       bid = Math.max(bid, p.floorMult * mk + 1);
     }
   }
+  if (p.denyW > 0 && v.opp) bid = Math.max(bid, p.denyW * denyGain(d, v.opp, letter));
   if (v.firstPrice) bid *= p.shade;
   bid = Math.floor(bid);
   return Math.max(0, Math.min(bid, v.balance));
+}
+
+// Cuánto mejora la mejor palabra del rival que más gana con esta letra.
+function denyGain(d: Dict, opp: Int32Array[], letter: number): number {
+  let best = 0;
+  for (const r of opp) {
+    let n = 0;
+    for (let i = 0; i < 26; i++) n += r[i]!;
+    if (n < 3) continue;
+    const k0 = bestWord(d, r, 2);
+    const r2 = new Int32Array(r);
+    r2[letter]!++;
+    const k1 = bestWord(d, r2, 2);
+    const g = (k1 >= 0 ? d.rew[k1]! : 0) - (k0 >= 0 ? d.rew[k0]! : 0);
+    if (g > best) best = g;
+  }
+  return best;
 }
 
 // Palabras a jugar ahora (puede ser varias en el vaciado final).
