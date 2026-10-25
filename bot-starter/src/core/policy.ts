@@ -50,6 +50,17 @@ export interface Params {
   endRounds: number;
   // el piso de mercado usa la puja máxima (lo que hay que superar) en vez del precio pagado
   floorTop: number; // 0/1
+  // segunda palabra: valor del atril = mejor palabra + w2 x potencial del resto sin ella
+  w2: number; // 0 = apagado (solo la mejor palabra)
+  // piso incondicional (estilo bro): pujar >= baseFloor x precio de mercado en toda subasta
+  baseFloor: number; // 0 = apagado
+  baseFloorMax: number; // solo mientras el atril tenga menos de estas fichas
+  // pacing contra una curva de saldo objetivo 100*(1-t)^paceExp: por encima de la
+  // curva la puja sube (exp(paceK*(saldo-objetivo)/50)), por debajo baja
+  paceK: number; // 0 = apagado
+  paceExp: number; // 1 = lineal; los del top gastan como ~1.5 (mitad del saldo al 30%)
+  // Q sin U ni I en el atril: la puja se multiplica por qW (el 27% de nuestras Q quedan sin usar)
+  qW: number; // 1 = sin efecto
 }
 
 export const DEFAULT_PARAMS: Params = {
@@ -81,6 +92,12 @@ export const DEFAULT_PARAMS: Params = {
   endBoost: 0,
   endRounds: 10,
   floorTop: 0,
+  w2: 0,
+  baseFloor: 0,
+  baseFloorMax: 12,
+  paceK: 0,
+  paceExp: 1.5,
+  qW: 1,
 };
 
 // Rangos para el optimizador: [min, max, entero?]
@@ -113,6 +130,12 @@ export const BOUNDS: Record<keyof Params, [number, number, boolean]> = {
   endBoost: [0, 4, false],
   endRounds: [2, 24, true],
   floorTop: [0, 1, true],
+  w2: [0, 1, false],
+  baseFloor: [0, 1.3, false],
+  baseFloorMax: [4, 20, true],
+  paceK: [0, 2, false],
+  paceExp: [0.3, 3, false],
+  qW: [0, 1.5, false],
 };
 
 export interface View {
@@ -149,14 +172,24 @@ function opts(p: Params, v: View): PotentialOpts {
   };
 }
 
+// Valor del atril: la mejor palabra alcanzable y, si w2 > 0, también lo que
+// queda por armar con el resto una vez jugada la mejor palabra ya formable.
+function rackValue(d: Dict, p: Params, r: Rack, o: PotentialOpts): number {
+  const main = potential(d, r, o);
+  if (p.w2 <= 0) return main;
+  const k = bestWord(d, r, o.minLen);
+  if (k < 0) return main;
+  return main + p.w2 * potential(d, subtract(d, r, k), o);
+}
+
 export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
   // La ficha de la última subasta llega cuando la partida ya terminó: vale 0.
   if (v.auctionsLeft <= 0) return 0;
   const o = opts(p, v);
-  const before = potential(d, v.rack, o);
+  const before = rackValue(d, p, v.rack, o);
   const r2 = new Int32Array(v.rack);
   r2[letter]!++;
-  const after = potential(d, r2, o);
+  const after = rackValue(d, p, r2, o);
   let delta = Math.max(0, after - before);
   const spend = v.balance / Math.max(1, v.auctionsLeft);
   // Final: lo que la letra suma al mejor conjunto de palabras jugable al cierre.
@@ -169,6 +202,14 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
   const faceW = delta > 0 ? p.beta : p.beta * p.idleBeta;
   let bid = p.alpha * delta + faceW * VALUE[letter]! + p.gamma + p.pace * spend;
   if (p.c0 !== 0 || p.c1 !== 0) bid *= Math.exp(p.c0) * Math.pow(Math.max(0.1, spend) / 3, p.c1);
+  // Q huérfana: sin U ni I casi no hay palabras con Q.
+  if (letter === 16 && p.qW !== 1 && v.rack[20]! === 0 && v.rack[8]! === 0) bid *= p.qW;
+  // Pacing: gastar al ritmo de los que ganan, no guardar para un final que no llega.
+  if (p.paceK > 0 && v.round !== undefined) {
+    const frac = (v.round - 1) / Math.max(1, v.round + v.auctionsLeft);
+    const target = 100 * Math.pow(1 - frac, p.paceExp);
+    bid *= Math.exp((p.paceK * (v.balance - target)) / 50);
+  }
   // Final: la plata que sobre no vale nada, así que las últimas letras pagan más.
   if (p.endBoost > 0 && v.auctionsLeft <= p.endRounds) {
     bid *= 1 + (p.endBoost * (p.endRounds + 1 - v.auctionsLeft)) / (p.endRounds + 1);
@@ -183,6 +224,14 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
       const table = p.floorTop >= 1 && v.marketTop ? v.marketTop : v.market;
       const mk = table[letter]?.[phaseOf(v.round, total)] ?? 0;
       bid = Math.max(bid, p.floorMult * mk + 1);
+    }
+  }
+  if (p.baseFloor > 0 && v.market && v.round !== undefined) {
+    let size = 0;
+    for (let i = 0; i < 26; i++) size += v.rack[i]!;
+    if (size < p.baseFloorMax) {
+      const mk = v.market[letter]?.[phaseOf(v.round, v.round + v.auctionsLeft)] ?? 0;
+      bid = Math.max(bid, p.baseFloor * mk + 1);
     }
   }
   if (p.denyW > 0 && v.opp) bid = Math.max(bid, p.denyW * denyGain(d, v.opp, letter));
