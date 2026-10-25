@@ -20,3 +20,19 @@ BOT_NAME=<nombre> TOURNAMENT_ID=<id> ./play.sh           # inscribirse al torneo
 ./improve.sh                                             # automejora infinita (otra terminal)
 npm run bench                                            # comparación rápida en el simulador
 ```
+
+## Arena de repetición (la referencia desde el 24/10)
+El simulador de `src/sim/` dice que ganamos el 87% de las partidas; en vivo ganamos ~35%. No sirve para decidir. La referencia es `src/train/replay.ts`: mete la política en partidas reales contra las pujas máximas archivadas.
+- `npx tsx src/train/scout.ts` baja todo el historial (`data/scout.jsonl`) y el leaderboard.
+- `N=400 npx tsx src/train/replay.ts a.json b.json` compara params como 7.º postor en las 400 partidas más nuevas.
+- `SELF=Lionel N=300 REPS=2 npx tsx src/train/replay.ts a.json` **arena propia**: reemplaza a Lionel en sus propias partidas contra los otros 5 reales (la puja máxima de los otros se conoce exacta: lo pagado si Lionel ganó, la puja del ganador si perdió). Es la más fiel.
+- `STEAL` (0.3) descuenta al rival la palabra que perdió por la letra que le sacamos; `DRAIN` (0.3) descuenta lo que el ganador paga de más por nuestra puja perdedora (Vickrey). Calibrados para reproducir los resultados reales de Lionel.
+- `SELF=Lionel DRAIN=0.3 TRAIN=190 TEST=98 GAMES=100 REPS=2 npx tsx src/train/replay-evolve.ts` optimiza en esa arena y prueba a ciegas en partidas no vistas. Escribe `params/replay-vickrey.json`; nunca toca `params/vickrey.json`.
+- `npx tsx src/train/dossier.ts` perfila el comportamiento de cada bot real (`data/scouting.md`); `npx tsx src/train/diagnose.ts` muestra en qué fase perdemos subastas y dónde queda la plata.
+
+## Lo que aprendimos del campo (24-25/10)
+- Todos los bots del top, y nosotros, convertimos ~0.53 puntos por moneda gastada. El puntaje es casi la plata gastada. Bro (2.º) gasta 184 y le sobran 10; Lionel gasta 162 y le sobran 24. Esa es toda la diferencia.
+- Esa plata queda en el saldo (~20) con el que llegamos a la ronda 55 y en los puntos del vaciado final, que entran cuando ya no hay nada que comprar.
+- Probado y descartado en la arena: tope por puja, impulso final, piso de mercado desde la ronda 1 (estilo bro), bloqueo de letras al rival, c0 alto, c1 alto o negativo. Todos empatan o pierden contra producción. Los parámetros actuales son un óptimo robusto de esta política.
+- Nijello (3.º, código público en bananatruck/scrabblebot-evo, sin licencia) ganó +6 puntos de win rate con *look-ahead* en las últimas 12 subastas: simula el resto de la partida por cada puja candidata. Es el siguiente cambio estructural con evidencia a favor.
+- La latencia de decisión es ~3 ms (máximo 51 ms) contra una ventana de 1000 ms: hay tiempo de sobra para look-ahead.

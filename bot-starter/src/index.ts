@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadDict } from "./core/dict.js";
 import { chooseWords, decideBid, DEFAULT_PARAMS, type Params } from "./core/policy.js";
-import { marketPrices } from "./core/prices.js";
+import { marketPrices, marketTop } from "./core/prices.js";
 import { BAG, emptyRack, idx } from "./core/rules.js";
 
 const HOST = process.env.STDB_HOST ?? "https://maincloud.spacetimedb.com";
@@ -106,6 +106,7 @@ function view(conn: DbConnection, matchId: bigint) {
       won: [...conn.db.auctionResult.iter()].filter((r) => r.matchId === matchId && r.winnerBotId === myBotId).length,
       round: m.currentRound,
       market: marketPrices(),
+      marketTop: marketTop(),
     },
   };
 }

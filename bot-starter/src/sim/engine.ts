@@ -4,7 +4,7 @@
 
 import { type Dict, loadDict } from "../core/dict.js";
 import { decideBid, chooseWords, type Params } from "../core/policy.js";
-import { marketPrices } from "../core/prices.js";
+import { marketPrices, marketTop } from "../core/prices.js";
 import {
   BAG,
   BAG_SIZE,
@@ -145,6 +145,7 @@ export function policyAgent(p: Params, name = "Policy", d = loadDict(), impl: Po
     won: seat.won,
     round: m.round,
     market: marketPrices(),
+    marketTop: marketTop(),
     opp: m.pubs?.filter((r) => r !== seat.pub),
   });
   return {

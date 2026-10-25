@@ -42,6 +42,14 @@ export interface Params {
   c1: number;
   // bloqueo: pujar al menos denyW x lo que la letra le suma a la mejor palabra de un rival
   denyW: number; // 0 = apagado
+  // tope por puja: fracción del saldo que se abre a medida que avanza la partida
+  capBase: number; // tope al inicio (1 = sin tope); al final siempre 1
+  capPow: number; // qué tan tarde se abre (más alto = más tarde)
+  // final: en las últimas endRounds subastas la puja sube hasta 1+endBoost
+  endBoost: number; // 0 = apagado
+  endRounds: number;
+  // el piso de mercado usa la puja máxima (lo que hay que superar) en vez del precio pagado
+  floorTop: number; // 0/1
 }
 
 export const DEFAULT_PARAMS: Params = {
@@ -68,6 +76,11 @@ export const DEFAULT_PARAMS: Params = {
   c0: 0,
   c1: 0,
   denyW: 0,
+  capBase: 1,
+  capPow: 2,
+  endBoost: 0,
+  endRounds: 10,
+  floorTop: 0,
 };
 
 // Rangos para el optimizador: [min, max, entero?]
@@ -78,23 +91,28 @@ export const BOUNDS: Record<keyof Params, [number, number, boolean]> = {
   minLen: [2, 7, true],
   alpha: [0, 3, false],
   beta: [0, 3, false],
-  gamma: [-2, 4, false],
+  gamma: [-2, 8, false],
   pace: [0, 1.5, false],
   shade: [0.3, 1, false],
   holdKappa: [0.5, 1.6, false],
-  minPlayReward: [0, 40, false],
+  minPlayReward: [0, 70, false],
   flushAt: [1, 6, true],
   lowCash: [0, 30, false],
   floorMult: [0, 1.5, false],
   letterTarget: [8, 20, false],
-  slack: [0, 5, false],
+  slack: [-4, 5, false],
   horizonW: [0, 2, false],
   idleBeta: [0, 1.5, false],
   endN: [0, 12, true],
   allIn: [0, 1, true],
-  c0: [-1, 1, false],
-  c1: [0, 1.2, false],
+  c0: [-1, 1.5, false],
+  c1: [-0.8, 1.2, false],
   denyW: [0, 2, false],
+  capBase: [0.1, 1, false],
+  capPow: [0.5, 4, false],
+  endBoost: [0, 4, false],
+  endRounds: [2, 24, true],
+  floorTop: [0, 1, true],
 };
 
 export interface View {
@@ -106,6 +124,7 @@ export interface View {
   won?: number; // letras ganadas en esta partida
   round?: number; // número de subasta actual (1-based)
   market?: number[][] | null; // [letra][fase] precio pagado mediano
+  marketTop?: number[][] | null; // [letra][fase] puja máxima mediana
   opp?: Int32Array[]; // atriles públicos de los rivales (ganadas - jugadas)
 }
 
@@ -150,6 +169,10 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
   const faceW = delta > 0 ? p.beta : p.beta * p.idleBeta;
   let bid = p.alpha * delta + faceW * VALUE[letter]! + p.gamma + p.pace * spend;
   if (p.c0 !== 0 || p.c1 !== 0) bid *= Math.exp(p.c0) * Math.pow(Math.max(0.1, spend) / 3, p.c1);
+  // Final: la plata que sobre no vale nada, así que las últimas letras pagan más.
+  if (p.endBoost > 0 && v.auctionsLeft <= p.endRounds) {
+    bid *= 1 + (p.endBoost * (p.endRounds + 1 - v.auctionsLeft)) / (p.endRounds + 1);
+  }
   // Atrasados en letras: no dejar pasar letras útiles por debajo del mercado.
   if (p.floorMult > 0 && v.market && v.won !== undefined && v.round !== undefined) {
     const total = v.round + v.auctionsLeft;
@@ -157,13 +180,21 @@ export function decideBid(d: Dict, p: Params, v: View, letter: number): number {
     let size = 0;
     for (let i = 0; i < 26; i++) size += v.rack[i]!;
     if (behind && (delta > 0 || size < 8)) {
-      const mk = v.market[letter]?.[phaseOf(v.round, total)] ?? 0;
+      const table = p.floorTop >= 1 && v.marketTop ? v.marketTop : v.market;
+      const mk = table[letter]?.[phaseOf(v.round, total)] ?? 0;
       bid = Math.max(bid, p.floorMult * mk + 1);
     }
   }
   if (p.denyW > 0 && v.opp) bid = Math.max(bid, p.denyW * denyGain(d, v.opp, letter));
   if (v.firstPrice) bid *= p.shade;
-  bid = Math.floor(bid);
+  // Tope: nunca quemar medio saldo en una letra temprana (la Z a 50 en la ronda 5).
+  let cap = v.balance;
+  if (p.capBase < 1 && v.round !== undefined) {
+    const total = v.round + v.auctionsLeft;
+    const frac = 1 - v.auctionsLeft / Math.max(1, total);
+    cap = v.balance * Math.min(1, p.capBase + (1 - p.capBase) * Math.pow(frac, p.capPow));
+  }
+  bid = Math.floor(Math.min(bid, cap));
   return Math.max(0, Math.min(bid, v.balance));
 }
 

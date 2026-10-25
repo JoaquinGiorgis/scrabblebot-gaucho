@@ -2,6 +2,7 @@
 // pujas reales del campo (partidas viejas) y valida a ciegas en las más nuevas.
 // No toca params/vickrey.json: el ganador queda en params/replay-vickrey.json.
 //   GENS=12 POP=24 GAMES=160 TEST=400 npx tsx src/train/replay-evolve.ts
+//   Arena propia (partidas de Lionel, 6 jugadores): SELF=Lionel TRAIN=190 TEST=98 GAMES=100 REPS=2 ...
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { Worker } from "node:worker_threads";

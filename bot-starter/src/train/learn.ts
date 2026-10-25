@@ -77,19 +77,31 @@ const lines = [
 fs.writeFileSync("data/report.md", lines.join("\n") + "\n");
 console.log(lines.join("\n"));
 
-// Tabla de precios de mercado por letra y fase para la política (piso de puja).
+// Tablas de mercado por letra y fase para la política (piso de puja): precio
+// pagado y puja máxima. Solo mesas de 6 bots reales, las 600 más recientes.
 {
-  const hist = "data/history.jsonl";
-  if (fs.existsSync(hist)) {
-    const paid: number[][][] = Array.from({ length: 26 }, () => Array.from({ length: 5 }, () => []));
-    for (const l of fs.readFileSync(hist, "utf8").split("\n").filter(Boolean).slice(-600)) {
+  const hist = ["data/scout.jsonl", "data/history.jsonl"].find((f) => fs.existsSync(f));
+  if (hist) {
+    const mk = () => Array.from({ length: 26 }, () => Array.from({ length: 5 }, () => [] as number[]));
+    const paid = mk(), top = mk();
+    const lines = fs.readFileSync(hist, "utf8").split("\n").filter(Boolean)
+      .filter((l) => { const r = JSON.parse(l); return r.participants.length === 6 && !r.participants.some((p: { sim?: boolean }) => p.sim); })
+      .slice(-600);
+    for (const l of lines) {
       const r = JSON.parse(l);
       const n = r.auctions.length;
-      r.auctions.forEach((a: { paid: number; letter: string; winner: string | null }, k: number) => {
-        if (a.winner) paid[idx(a.letter)]![Math.min(4, Math.floor((k * 5) / n))]!.push(a.paid);
+      r.auctions.forEach((a: { paid: number; top: number | null; letter: string; winner: string | null }, k: number) => {
+        if (!a.winner) return;
+        const ph = Math.min(4, Math.floor((k * 5) / n));
+        paid[idx(a.letter)]![ph]!.push(a.paid);
+        if (a.top !== null) top[idx(a.letter)]![ph]!.push(a.top);
       });
     }
     const med = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1]! : 0);
+    fs.mkdirSync("params", { recursive: true });
+    fs.writeFileSync("params/market-paid.json", JSON.stringify(paid.map((ps) => ps.map(med))));
+    fs.writeFileSync("params/market-top.json", JSON.stringify(top.map((ps) => ps.map(med))));
     fs.writeFileSync("data/market-prices.json", JSON.stringify(paid.map((ps) => ps.map(med))));
+    console.log(`mercado: ${lines.length} partidas -> params/market-{paid,top}.json`);
   }
 }
